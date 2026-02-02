@@ -7,30 +7,18 @@ and simulation results. (Placeholder for future implementation)
 
 from typing import Optional, Tuple, List
 import numpy as np
-
-# Optional matplotlib import
-try:
-    import matplotlib.pyplot as plt
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
-
-
-def _check_matplotlib():
-    """Check if matplotlib is available."""
-    if not HAS_MATPLOTLIB:
-        raise ImportError("matplotlib is required for visualization. "
-                         "Install with: pip install matplotlib")
-
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from mpl_toolkits.mplot3d import Axes3D
 
 def plot_filter_function(
     frequencies: np.ndarray,
-    filter_func: 'FilterFunction',
-    ax: Optional['plt.Axes'] = None,
+    filter_func: 'FilterFunction', # pyright: ignore[reportUndefinedVariable]
+    ax: Optional[Axes] = None,
     components: bool = False,
     loglog: bool = True,
     label: Optional[str] = None
-    ) -> 'plt.Axes':
+    ) -> Axes:
     """
     Plot the filter function magnitude.
 
@@ -54,7 +42,6 @@ def plot_filter_function(
     plt.Axes
         The matplotlib axes object
     """
-    _check_matplotlib()
 
     if ax is None:
         fig, ax = plt.subplots()
@@ -82,9 +69,9 @@ def plot_filter_function(
 def plot_unitary_trajectory(
     times: np.ndarray,
     U_trajectory: np.ndarray,
-    ax: Optional['plt.Axes'] = None,
+    ax: Optional[Axes] = None,
     components: str = 'populations'
-) -> 'plt.Axes':
+) -> Axes:
     """
     Plot the unitary evolution trajectory.
 
@@ -104,8 +91,6 @@ def plot_unitary_trajectory(
     plt.Axes
         The matplotlib axes object
     """
-    _check_matplotlib()
-
     if ax is None:
         fig, ax = plt.subplots()
 
@@ -133,9 +118,9 @@ def plot_unitary_trajectory(
 
 def plot_bloch_trajectory(
     U_trajectory: np.ndarray,
-    ax: Optional['plt.Axes'] = None,
-    initial_state: np.ndarray = None
-) -> 'plt.Axes':
+    ax: Optional[Axes3D] = None,
+    initial_state: Optional[np.ndarray] = None
+) -> Axes3D:
     """
     Plot the Bloch sphere trajectory.
 
@@ -153,9 +138,6 @@ def plot_bloch_trajectory(
     plt.Axes
         The matplotlib 3D axes object
     """
-    _check_matplotlib()
-    from mpl_toolkits.mplot3d import Axes3D
-
     if ax is None:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -202,11 +184,11 @@ def plot_bloch_trajectory(
 
 def compare_filter_functions(
     frequencies: np.ndarray,
-    filter_funcs: List[Tuple['FilterFunction', str]],
-    ax: Optional['plt.Axes'] = None,
+    filter_funcs: List[Tuple['FilterFunction', str]], # pyright: ignore[reportUndefinedVariable]
+    ax: Optional[Axes] = None,
     loglog: bool = True,
     reference_lines: Optional[List[Tuple[float, str]]] = None
-) -> 'plt.Axes':
+) -> Axes:
     """
     Compare multiple filter functions on the same plot.
 
@@ -228,8 +210,6 @@ def compare_filter_functions(
     plt.Axes
         The matplotlib axes object
     """
-    _check_matplotlib()
-
     if ax is None:
         fig, ax = plt.subplots()
 

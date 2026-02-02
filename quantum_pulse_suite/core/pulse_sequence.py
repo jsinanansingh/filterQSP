@@ -459,62 +459,60 @@ class ContinuousPulseSequence(PulseSequence):
             self._poly_list.append((f_prev_val, g_prev_val, omega, n_x, n_y, n_z, tau))
 
             if i == 0:
-                def make_F_first(rabi=rabi, delta=delta, omega=omega, axis=axis,
-                                 tau=tau, t0=curr_time):
-                    n_z = axis[2]
+                def make_F_first(rabi_val, delta_val, omega_val, axis_val, tau_val, t0_val):
+                    n_z = axis_val[2]
                     def F(t):
-                        dt = t - t0
-                        return (np.cos(rabi * dt / 2) -
-                                1j * (delta + n_z * omega) / rabi * np.sin(rabi * dt / 2))
+                        dt = t - t0_val
+                        return (np.cos(rabi_val * dt / 2) -
+                                1j * (delta_val + n_z * omega_val) / rabi_val * np.sin(rabi_val * dt / 2))
                     return F
 
-                def make_G_first(rabi=rabi, delta=delta, omega=omega, axis=axis,
-                                 tau=tau, t0=curr_time):
-                    n_x, n_y = axis[0], axis[1]
+                def make_G_first(rabi_val, delta_val, omega_val, axis_val, tau_val, t0_val):
+                    n_x, n_y = axis_val[0], axis_val[1]
                     def G(t):
-                        dt = t - t0
-                        return (n_x - 1j * n_y) * omega / rabi * np.sin(rabi * dt / 2)
+                        dt = t - t0_val
+                        return (n_x - 1j * n_y) * omega_val / rabi_val * np.sin(rabi_val * dt / 2)
                     return G
 
                 F_func = make_F_first(rabi, delta, omega, axis, tau, curr_time)
                 G_func = make_G_first(rabi, delta, omega, axis, tau, curr_time)
             else:
-                def make_F_subsequent(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
-                           t0=curr_time, f_prev=f_prev_val, g_prev=g_prev_val):
-                    n_x, n_y, n_z = axis
+                def make_F_subsequent(rabi_val, delta_val, omega_val, axis_val, tau_val,
+                           t0_val, f_prev_val_arg, g_prev_val_arg):
+                    n_x, n_y, n_z = axis_val
                     def F(t):
-                        dt = t - t0
-                        term1 = ((np.cos(rabi * dt / 2) +
-                                 1j * (delta + n_z * omega) / rabi * np.sin(rabi * dt / 2)) *
-                                 f_prev)
-                        term2 = ((-n_x + 1j * n_y) * omega / rabi *
-                                 np.sin(rabi * dt / 2) * np.conj(g_prev))
+                        dt = t - t0_val
+                        term1 = ((np.cos(rabi_val * dt / 2) +
+                                 1j * (delta_val + n_z * omega_val) / rabi_val * np.sin(rabi_val * dt / 2)) *
+                                 f_prev_val_arg)
+                        term2 = ((-n_x + 1j * n_y) * omega_val / rabi_val *
+                                 np.sin(rabi_val * dt / 2) * np.conj(g_prev_val_arg))
                         return term1 + term2
                     return F
 
-                def make_G_subsequent(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
-                           t0=curr_time, f_prev=f_prev_val, g_prev=g_prev_val):
-                    n_x, n_y, n_z = axis
+                def make_G_subsequent(rabi_val, delta_val, omega_val, axis_val, tau_val,
+                           t0_val, f_prev_val_arg, g_prev_val_arg):
+                    n_x, n_y, n_z = axis_val
                     def G(t):
-                        dt = t - t0
-                        term1 = ((n_x - 1j * n_y) * omega / rabi *
-                                 np.sin(rabi * dt / 2) * np.conj(f_prev))
-                        term2 = ((np.cos(rabi * dt / 2) +
-                                 1j * (delta + n_z * omega) / rabi * np.sin(rabi * dt / 2)) *
-                                 g_prev)
+                        dt = t - t0_val
+                        term1 = ((n_x - 1j * n_y) * omega_val / rabi_val *
+                                 np.sin(rabi_val * dt / 2) * np.conj(f_prev_val_arg))
+                        term2 = ((np.cos(rabi_val * dt / 2) +
+                                 1j * (delta_val + n_z * omega_val) / rabi_val * np.sin(rabi_val * dt / 2)) *
+                                 g_prev_val_arg)
                         return term1 + term2
                     return G
 
-                F = make_F_subsequent()
-                G = make_G_subsequent()
+                F_func = make_F_subsequent(rabi, delta, omega, axis, tau, curr_time, f_prev_val, g_prev_val)
+                G_func = make_G_subsequent(rabi, delta, omega, axis, tau, curr_time, f_prev_val, g_prev_val)
 
             start_time = curr_time
             end_time = curr_time + tau
-            self._polynomial_segments.append((F, G, start_time, end_time))
+            self._polynomial_segments.append((F_func, G_func, start_time, end_time))
 
             # Update for next segment
-            f_prev_val = F(end_time)
-            g_prev_val = G(end_time)
+            f_prev_val = F_func(end_time)
+            g_prev_val = G_func(end_time)
             curr_time = end_time
 
         self._polynomials_computed = True
@@ -616,7 +614,7 @@ def cpmg_sequence(tau: float, n_pulses: int, delta: float = 0.0) -> Instantaneou
     return seq
 
 
-def continuous_rabi_sequence(omega: float, tau: float, axis: List[float] = None,
+def continuous_rabi_sequence(omega: float, tau: float, axis: Optional[List[float]] = None,
                               delta: float = 0.0) -> ContinuousPulseSequence:
     """
     Create a single continuous Rabi pulse.
