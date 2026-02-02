@@ -21,11 +21,11 @@ IDENTITY = np.eye(2, dtype=complex)
 
 def normalize_axis(axis: List[float]) -> np.ndarray:
     """Normalize a 3D axis vector."""
-    axis = np.array(axis, dtype=float)
-    norm = np.linalg.norm(axis)
+    axis_array = np.asarray(axis, dtype=float)
+    norm = np.linalg.norm(axis_array)
     if norm < 1e-12:
         raise ValueError("Axis vector cannot be zero.")
-    return axis / norm
+    return axis_array / norm
 
 
 def axis_from_spherical(theta: float, phi: float) -> np.ndarray:
@@ -342,6 +342,7 @@ class InstantaneousPulseSequence(PulseSequence):
         curr_time = 0.0
         f_prev = 1.0
         g_prev = 0.0
+        theta = 0.0
 
         # Track whether we've seen an x-rotation yet
         first_rotation = True
@@ -350,6 +351,7 @@ class InstantaneousPulseSequence(PulseSequence):
             if isinstance(element, FreeEvolution):
                 delta = element.delta
                 tau = element.tau
+                theta = 0.0  # No rotation during free evolution
 
                 # Store polynomial info for filter functions
                 if first_rotation:
@@ -358,27 +360,26 @@ class InstantaneousPulseSequence(PulseSequence):
                 else:
                     self._poly_list.append((f_prev, g_prev, theta, tau, curr_time + tau))
 
-                # Create polynomial functions for this segment
-                def make_F(delta=delta, tau=tau, t0=curr_time, f_prev=f_prev, g_prev=g_prev):
+                # Create polynomial functions for this segment using function factories
+                def make_F(delta, tau, t0, f_prev):
                     def F(t):
                         return np.exp(1j * delta * (t - t0) / 2) * f_prev
                     return F
 
-                def make_G(delta=delta, tau=tau, t0=curr_time, f_prev=f_prev, g_prev=g_prev):
+                def make_G(delta, tau, t0, g_prev):
                     def G(t):
                         return np.exp(1j * delta * (t - t0) / 2) * g_prev
                     return G
-
-                F = make_F()
-                G = make_G()
-
+                
                 start_time = curr_time
                 end_time = curr_time + tau
-                self._polynomial_segments.append((F, G, start_time, end_time))
+                F_func = make_F(delta, tau, curr_time, f_prev)
+                G_func = make_G(delta, tau, curr_time, g_prev)
+                self._polynomial_segments.append((F_func, G_func, start_time, end_time))
 
                 # Update for next segment - evaluate at end of this segment
-                f_prev = F(end_time)
-                g_prev = G(end_time)
+                f_prev = F_func(end_time)
+                g_prev = G_func(end_time)
                 curr_time = end_time
 
             elif isinstance(element, InstantaneousPulse):
@@ -475,10 +476,10 @@ class ContinuousPulseSequence(PulseSequence):
                         return (n_x - 1j * n_y) * omega / rabi * np.sin(rabi * dt / 2)
                     return G
 
-                F = make_F_first()
-                G = make_G_first()
+                F_func = make_F_first(rabi, delta, omega, axis, tau, curr_time)
+                G_func = make_G_first(rabi, delta, omega, axis, tau, curr_time)
             else:
-                def make_F(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
+                def make_F_subsequent(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
                            t0=curr_time, f_prev=f_prev_val, g_prev=g_prev_val):
                     n_x, n_y, n_z = axis
                     def F(t):
@@ -491,7 +492,7 @@ class ContinuousPulseSequence(PulseSequence):
                         return term1 + term2
                     return F
 
-                def make_G(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
+                def make_G_subsequent(rabi=rabi, delta=delta, omega=omega, axis=axis, tau=tau,
                            t0=curr_time, f_prev=f_prev_val, g_prev=g_prev_val):
                     n_x, n_y, n_z = axis
                     def G(t):
@@ -504,8 +505,8 @@ class ContinuousPulseSequence(PulseSequence):
                         return term1 + term2
                     return G
 
-                F = make_F()
-                G = make_G()
+                F = make_F_subsequent()
+                G = make_G_subsequent()
 
             start_time = curr_time
             end_time = curr_time + tau

@@ -5,7 +5,8 @@
       "Bash(conda activate:*)",
       "Bash(python:*)",
       "Bash(git add quantum_pulse_suite/ from_mm_qsp_filter_funcs.py)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git reset:*)"
     ]
   }
 }
