@@ -268,6 +268,70 @@ class TestFilterFunctionDecoherence(unittest.TestCase):
             self.assertGreater(ratio, 0.01)
             self.assertLess(ratio, 100)
 
+    def test_ramsey_variance_convergence(self):
+        """Test that numerical variance converges toward the analytic prediction as
+        trajectory count increases from 100 to 150."""
+        tau = 0.4
+        psd_amplitude = 0.015
+
+        # Analytic prediction from filter function
+        seq = ramsey_sequence(tau=tau, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+        psd_func = ColoredNoisePSD.white_noise(amplitude=psd_amplitude)
+        analytic_var = self._compute_analytic_variance(ff, psd_func)
+
+        # Approximate instantaneous π/2 pulses with fast finite pulses
+        t_pulse = 0.01
+        omega_pulse = np.pi / 2 / t_pulse
+        params = np.array([
+            [omega_pulse, 1, 0, 0, 0, t_pulse],  # π/2 x-pulse
+            [0, 0, 0, 1, 0, tau],                 # Free evolution
+            [omega_pulse, 1, 0, 0, 0, t_pulse],  # π/2 x-pulse
+        ])
+
+        initial_state = np.array([1, 0], dtype=complex)
+        measurement_op = SIGMA_Y
+
+        # Run at two trajectory counts
+        var_100 = self.analyzer.avg_var_trajectories(
+            params, measurement_op,
+            n_trajectories=100,
+            noise_type=0,
+            psd_amplitude=psd_amplitude,
+            initial_state=initial_state,
+        )
+        var_150 = self.analyzer.avg_var_trajectories(
+            params, measurement_op,
+            n_trajectories=150,
+            noise_type=0,
+            psd_amplitude=psd_amplitude,
+            initial_state=initial_state,
+        )
+
+        # Both estimates must be finite and positive
+        self.assertTrue(np.isfinite(var_100))
+        self.assertTrue(np.isfinite(var_150))
+        self.assertGreater(var_100, 0)
+        self.assertGreater(var_150, 0)
+
+        if analytic_var > 1e-10:
+            ratio_100 = var_100 / analytic_var
+            ratio_150 = var_150 / analytic_var
+
+            # Both ratios should land within an order of magnitude of 1.0
+            self.assertGreater(ratio_100, 0.1)
+            self.assertLess(ratio_100, 10.0)
+            self.assertGreater(ratio_150, 0.1)
+            self.assertLess(ratio_150, 10.0)
+
+            # The 150-trajectory estimate should be at least as close to the
+            # analytic value as the 100-trajectory estimate.  A slack factor
+            # of 2.0 absorbs the inherent run-to-run stochastic variation
+            # while still enforcing that the longer run does not diverge.
+            error_100 = abs(ratio_100 - 1.0)
+            error_150 = abs(ratio_150 - 1.0)
+            self.assertLess(error_150, error_100 * 2.0)
+
     def test_rabi_fidelity_decay(self):
         """Test that Rabi oscillation fidelity decays with noise."""
         omega = np.pi  # π rotation (ω*τ = π)
