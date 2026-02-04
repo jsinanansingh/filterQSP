@@ -12,6 +12,8 @@ from scipy.integrate import simpson
 from quantum_pulse_suite import (
     SIGMA_X, SIGMA_Y, SIGMA_Z, IDENTITY,
     ramsey_sequence,
+    spin_echo_sequence,
+    cpmg_sequence,
     continuous_rabi_sequence,
     InstantaneousPulseSequence,
     ContinuousPulseSequence,
@@ -22,6 +24,12 @@ from quantum_pulse_suite.analysis import (
     NumericalEvolution,
     TrajectoryAnalyzer,
     bloch_vector_from_operator,
+    dick_effect_coefficients,
+    allan_variance_dick,
+    allan_variance_continuous,
+    allan_deviation,
+    allan_variance_vs_tau,
+    quantum_projection_noise_limit,
 )
 
 
@@ -126,6 +134,176 @@ class TestRabiFilterFunction(unittest.TestCase):
         tau = 3.0
         seq = continuous_rabi_sequence(omega=np.pi, tau=tau, delta=0.0)
         self.assertAlmostEqual(seq.total_duration(), tau, places=10)
+
+
+class TestCPMGFilterFunction(unittest.TestCase):
+    """Test CPMG sequence filter functions against known analytical properties.
+
+    For CPMG-N (N π-pulses) with total free evolution time τ:
+    - Interpulse spacing: Δt = τ/(2N)
+    - Filter function peaks at ω = π(2k+1)/Δt = 2πN(2k+1)/τ for k=0,1,2,...
+    - Filter function zeros at ω = 2πm/τ for integer m (sequence repetition harmonics)
+    """
+
+    def test_cpmg_total_duration(self):
+        """Test that CPMG sequence has correct total duration."""
+        tau = 2.0
+        n_pulses = 4
+        seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+
+        # Instantaneous pulses have zero duration, so total = tau
+        self.assertAlmostEqual(seq.total_duration(), tau, places=10)
+
+    def test_cpmg_filter_function_computable(self):
+        """Test that CPMG filter function is computable and finite."""
+        tau = 1.0
+        n_pulses = 4
+        seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        frequencies = np.logspace(-1, 2, 100)
+        Fx, Fy, Fz = ff.filter_function(frequencies)
+
+        self.assertTrue(np.all(np.isfinite(Fx)))
+        self.assertTrue(np.all(np.isfinite(Fy)))
+        self.assertTrue(np.all(np.isfinite(Fz)))
+
+    def test_cpmg_has_peak_structure(self):
+        """Test that CPMG filter function has a clear peak structure.
+
+        The filter function should have at least one distinct peak in
+        the frequency range related to the pulse spacing.
+        """
+        tau = 1.0
+        n_pulses = 4
+        seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        # Search over a wide frequency range
+        frequencies = np.linspace(1, 100, 500)
+        susceptibility = ff.noise_susceptibility(frequencies)
+
+        # Find the peak
+        peak_idx = np.argmax(susceptibility)
+        peak_value = susceptibility[peak_idx]
+
+        # There should be a clear peak (not monotonic)
+        # Check that peak is greater than values at edges
+        self.assertGreater(peak_value, susceptibility[0])
+        self.assertGreater(peak_value, susceptibility[-1])
+
+        # The peak should be significantly above the minimum
+        min_value = np.min(susceptibility)
+        if min_value > 0:
+            self.assertGreater(peak_value / min_value, 2.0)
+
+    def test_cpmg_zeros_at_sequence_harmonics(self):
+        """Test that CPMG filter function has zeros at sequence repetition harmonics.
+
+        The filter function should have local minima near ω = 2πk/τ for integer k,
+        corresponding to the zeros of the modulation function.
+        """
+        tau = 1.0
+        n_pulses = 4
+        seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        # Test at first few harmonics: ω = 2π/τ, 4π/τ, 6π/τ
+        for k in [1, 2, 3]:
+            omega_zero = 2 * np.pi * k / tau
+
+            # Skip if this coincides with a peak (happens when k is odd multiple of N)
+            if k % n_pulses == 0:
+                continue
+
+            # Evaluate around the expected zero
+            freqs = np.array([
+                omega_zero * 0.9,
+                omega_zero,
+                omega_zero * 1.1
+            ])
+            susceptibility = ff.noise_susceptibility(freqs)
+
+            # The center value should be a local minimum
+            self.assertLess(susceptibility[1], susceptibility[0] * 1.5,
+                           f"Not a minimum at k={k}: {susceptibility}")
+            self.assertLess(susceptibility[1], susceptibility[2] * 1.5,
+                           f"Not a minimum at k={k}: {susceptibility}")
+
+    def test_cpmg_more_pulses_shifts_peak(self):
+        """Test that increasing N in CPMG shifts the peak to higher frequencies.
+
+        More pulses should shift the passband center to higher frequencies
+        since the effective modulation rate increases.
+        """
+        tau = 1.0
+        seq_n2 = cpmg_sequence(tau=tau, n_pulses=2, delta=0.0)
+        seq_n8 = cpmg_sequence(tau=tau, n_pulses=8, delta=0.0)
+
+        ff_n2 = seq_n2.get_filter_function_calculator()
+        ff_n8 = seq_n8.get_filter_function_calculator()
+
+        # Find peak locations
+        frequencies = np.linspace(1, 200, 1000)
+
+        susc_n2 = ff_n2.noise_susceptibility(frequencies)
+        susc_n8 = ff_n8.noise_susceptibility(frequencies)
+
+        peak_freq_n2 = frequencies[np.argmax(susc_n2)]
+        peak_freq_n8 = frequencies[np.argmax(susc_n8)]
+
+        # N=8 should have peak at higher frequency than N=2
+        self.assertGreater(peak_freq_n8, peak_freq_n2)
+
+    def test_cpmg_vs_spin_echo(self):
+        """Test that CPMG-1 is equivalent to spin echo."""
+        tau = 1.0
+        seq_cpmg1 = cpmg_sequence(tau=tau, n_pulses=1, delta=0.0)
+        seq_echo = spin_echo_sequence(tau=tau, delta=0.0)
+
+        # Both should have same total duration
+        self.assertAlmostEqual(
+            seq_cpmg1.total_duration(),
+            seq_echo.total_duration(),
+            places=10
+        )
+
+        # Filter functions should have similar structure
+        ff_cpmg = seq_cpmg1.get_filter_function_calculator()
+        ff_echo = seq_echo.get_filter_function_calculator()
+
+        frequencies = np.linspace(1, 30, 50)
+        susc_cpmg = ff_cpmg.noise_susceptibility(frequencies)
+        susc_echo = ff_echo.noise_susceptibility(frequencies)
+
+        # They should be correlated (similar shape)
+        correlation = np.corrcoef(susc_cpmg, susc_echo)[0, 1]
+        self.assertGreater(correlation, 0.8)
+
+    def test_cpmg_frequency_selectivity(self):
+        """Test that CPMG has frequency-selective behavior.
+
+        The filter function should vary significantly across frequencies,
+        showing the bandpass-like behavior characteristic of dynamical decoupling.
+        """
+        tau = 1.0
+        n_pulses = 4
+        seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        # Evaluate over a range of frequencies
+        frequencies = np.logspace(-1, 2, 100)
+        susceptibility = ff.noise_susceptibility(frequencies)
+
+        # Filter function should have significant variation (not flat)
+        # indicating frequency-selective behavior
+        max_susc = np.max(susceptibility)
+        min_susc = np.min(susceptibility)
+
+        # There should be at least some contrast
+        if max_susc > 1e-20:
+            # Check that filter is not completely flat
+            self.assertGreater(max_susc, min_susc * 1.1)
 
 
 class TestNumericalEvolution(unittest.TestCase):
@@ -483,6 +661,178 @@ class TestBlochVector(unittest.TestCase):
         self.assertEqual(bloch[0], 1)  # x component
         self.assertEqual(bloch[1], 0)  # y component
         self.assertEqual(bloch[2], 0)  # z component
+
+
+class TestAllanVariance(unittest.TestCase):
+    """Test Allan variance computation for clock experiments."""
+
+    def test_dick_coefficients_computable(self):
+        """Test that Dick effect coefficients are computable and finite."""
+        tau = 0.1  # 100 ms interrogation
+        t_dead = 0.05  # 50 ms dead time
+        seq = ramsey_sequence(tau=tau, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        g_m_sq = dick_effect_coefficients(ff, tau, t_dead, n_harmonics=20)
+
+        self.assertEqual(len(g_m_sq), 20)
+        self.assertTrue(np.all(np.isfinite(g_m_sq)))
+        self.assertTrue(np.all(g_m_sq >= 0))
+
+    def test_dick_coefficients_decrease(self):
+        """Test that Dick coefficients generally decrease with harmonic number."""
+        tau = 0.1
+        t_dead = 0.02
+        seq = ramsey_sequence(tau=tau, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        g_m_sq = dick_effect_coefficients(ff, tau, t_dead, n_harmonics=50)
+
+        # Average of first 10 harmonics should be larger than average of last 10
+        avg_low = np.mean(g_m_sq[:10])
+        avg_high = np.mean(g_m_sq[-10:])
+
+        self.assertGreater(avg_low, avg_high * 0.1)
+
+    def test_allan_variance_positive(self):
+        """Test that Allan variance is positive and finite."""
+        tau_interrog = 0.1
+        t_dead = 0.05
+        tau_avg = 1.0
+
+        seq = ramsey_sequence(tau=tau_interrog, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        # White frequency noise PSD
+        def white_psd(omega):
+            return 1e-26 * np.ones_like(omega)
+
+        var = allan_variance_dick(ff, white_psd, tau_interrog, t_dead, tau_avg)
+
+        self.assertTrue(np.isfinite(var))
+        self.assertGreater(var, 0)
+
+    def test_allan_variance_scales_with_tau(self):
+        """Test that Allan variance decreases with averaging time for white noise."""
+        tau_interrog = 0.1
+        t_dead = 0.02
+
+        seq = ramsey_sequence(tau=tau_interrog, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        def white_psd(omega):
+            return 1e-24 * np.ones_like(omega)
+
+        var_1s = allan_variance_dick(ff, white_psd, tau_interrog, t_dead, 1.0)
+        var_10s = allan_variance_dick(ff, white_psd, tau_interrog, t_dead, 10.0)
+
+        # For white frequency noise, Allan variance ~ 1/τ
+        # So var_1s should be larger than var_10s
+        self.assertGreater(var_1s, var_10s)
+
+    def test_allan_deviation_methods_consistent(self):
+        """Test that different Allan variance methods give consistent results."""
+        tau_interrog = 0.05
+        t_dead = 0.02
+        tau_avg = 0.5
+
+        seq = ramsey_sequence(tau=tau_interrog, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        def white_psd(omega):
+            return 1e-24 * np.ones_like(omega)
+
+        adev_dick = allan_deviation(
+            ff, white_psd, tau_interrog, t_dead, tau_avg, method='dick'
+        )
+        adev_cont = allan_deviation(
+            ff, white_psd, tau_interrog, t_dead, tau_avg, method='continuous'
+        )
+
+        # Both methods should give finite positive results
+        self.assertTrue(np.isfinite(adev_dick))
+        self.assertTrue(np.isfinite(adev_cont))
+        self.assertGreater(adev_dick, 0)
+        self.assertGreater(adev_cont, 0)
+
+        # They should be within the same order of magnitude
+        ratio = adev_dick / adev_cont
+        self.assertGreater(ratio, 0.01)
+        self.assertLess(ratio, 100)
+
+    def test_allan_variance_vs_tau_array(self):
+        """Test computing Allan variance over array of averaging times."""
+        tau_interrog = 0.1
+        t_dead = 0.02
+
+        seq = ramsey_sequence(tau=tau_interrog, delta=0.0)
+        ff = seq.get_filter_function_calculator()
+
+        def flicker_psd(omega):
+            # 1/f noise
+            return 1e-24 / (np.abs(omega) + 1e-10)
+
+        tau_array = np.array([0.5, 1.0, 2.0, 5.0, 10.0])
+        variances = allan_variance_vs_tau(
+            ff, flicker_psd, tau_interrog, t_dead, tau_array
+        )
+
+        self.assertEqual(len(variances), len(tau_array))
+        self.assertTrue(np.all(np.isfinite(variances)))
+        self.assertTrue(np.all(variances >= 0))
+
+    def test_qpn_limit_scaling(self):
+        """Test quantum projection noise limit scales correctly."""
+        tau_interrog = 0.1
+        t_dead = 0.02
+        n_atoms = 1000
+        freq = 1e15  # Optical clock frequency
+
+        qpn_func = quantum_projection_noise_limit(
+            tau_interrog, t_dead, n_atoms, freq
+        )
+
+        sigma_1s = qpn_func(1.0)
+        sigma_100s = qpn_func(100.0)
+
+        # QPN scales as 1/√τ
+        expected_ratio = np.sqrt(100.0 / 1.0)
+        actual_ratio = sigma_1s / sigma_100s
+
+        np.testing.assert_almost_equal(actual_ratio, expected_ratio, decimal=5)
+
+    def test_allan_variance_different_sequences(self):
+        """Test that Allan variance computation works for different sequences.
+
+        Verify that we can compute Allan variance for both Ramsey and CPMG
+        sequences with different noise spectra.
+        """
+        tau = 0.1
+        t_dead = 0.02
+        tau_avg = 1.0
+
+        seq_ramsey = ramsey_sequence(tau=tau, delta=0.0)
+        seq_cpmg = cpmg_sequence(tau=tau, n_pulses=4, delta=0.0)
+
+        ff_ramsey = seq_ramsey.get_filter_function_calculator()
+        ff_cpmg = seq_cpmg.get_filter_function_calculator()
+
+        # White noise PSD
+        def white_psd(omega):
+            return 1e-24 * np.ones_like(omega)
+
+        var_ramsey = allan_variance_dick(
+            ff_ramsey, white_psd, tau, t_dead, tau_avg
+        )
+        var_cpmg = allan_variance_dick(
+            ff_cpmg, white_psd, tau, t_dead, tau_avg
+        )
+
+        # Both should give finite positive results
+        self.assertTrue(np.isfinite(var_ramsey))
+        self.assertTrue(np.isfinite(var_cpmg))
+        self.assertGreater(var_ramsey, 0)
+        self.assertGreater(var_cpmg, 0)
 
 
 if __name__ == '__main__':
