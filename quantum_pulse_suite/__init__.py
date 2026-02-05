@@ -64,6 +64,15 @@ __version__ = "0.1.0"
 
 # Import main classes from core module
 from .core import (
+    # Hilbert space (new)
+    HilbertSpace,
+    Subspace,
+    LiouvilleSpace,
+    # Operator algebra (new)
+    generalized_gell_mann_matrices,
+    gell_mann_matrices,
+    pauli_matrices,
+    subspace_pauli,
     # Constants
     SIGMA_X,
     SIGMA_Y,
@@ -101,6 +110,13 @@ from .core import (
     NoiseGenerator,
 )
 
+# Import quantum system classes
+from .systems import (
+    QuantumSystem,
+    QubitSystem,
+    ThreeLevelClock,
+)
+
 # Import analysis classes
 from .analysis import (
     bloch_vector_from_operator,
@@ -111,6 +127,19 @@ from .analysis import (
 __all__ = [
     # Version
     '__version__',
+    # Hilbert space
+    'HilbertSpace',
+    'Subspace',
+    'LiouvilleSpace',
+    # Operator algebra
+    'generalized_gell_mann_matrices',
+    'gell_mann_matrices',
+    'pauli_matrices',
+    'subspace_pauli',
+    # Quantum systems
+    'QuantumSystem',
+    'QubitSystem',
+    'ThreeLevelClock',
     # Constants
     'SIGMA_X',
     'SIGMA_Y',

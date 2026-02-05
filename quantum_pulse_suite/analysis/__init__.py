@@ -21,6 +21,13 @@ from .allan_variance import (
     quantum_projection_noise_limit,
 )
 
+from .global_phase_spectroscopy import (
+    GlobalPhaseSpectroscopySequence,
+    GPSFilterFunction,
+    gps_filter_functions_comparison,
+    plot_gps_filter_functions,
+)
+
 __all__ = [
     'bloch_vector_from_operator',
     'NumericalEvolution',
@@ -33,4 +40,9 @@ __all__ = [
     'allan_deviation',
     'allan_variance_vs_tau',
     'quantum_projection_noise_limit',
+    # Global phase spectroscopy
+    'GlobalPhaseSpectroscopySequence',
+    'GPSFilterFunction',
+    'gps_filter_functions_comparison',
+    'plot_gps_filter_functions',
 ]
