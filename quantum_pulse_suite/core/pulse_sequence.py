@@ -458,7 +458,22 @@ class ContinuousPulseSequence(PulseSequence):
             # Store for filter function calculation
             self._poly_list.append((f_prev_val, g_prev_val, omega, n_x, n_y, n_z, tau))
 
-            if i == 0:
+            # Special case: identity evolution when effective Rabi frequency is zero
+            # (both omega=0 and delta=0 means H=0, so U=I)
+            if rabi < 1e-12:
+                def make_F_identity(f_prev_val_arg):
+                    def F(t):
+                        return f_prev_val_arg
+                    return F
+
+                def make_G_identity(g_prev_val_arg):
+                    def G(t):
+                        return g_prev_val_arg
+                    return G
+
+                F_func = make_F_identity(f_prev_val)
+                G_func = make_G_identity(g_prev_val)
+            elif i == 0:
                 def make_F_first(rabi_val, delta_val, omega_val, axis_val, tau_val, t0_val):
                     n_z = axis_val[2]
                     def F(t):
