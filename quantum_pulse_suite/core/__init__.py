@@ -50,6 +50,8 @@ from .pulse_sequence import (
     spin_echo_sequence,
     cpmg_sequence,
     continuous_rabi_sequence,
+    continuous_ramsey_sequence,
+    continuous_cpmg_sequence,
 )
 
 from .filter_functions import (
@@ -128,6 +130,8 @@ __all__ = [
     'spin_echo_sequence',
     'cpmg_sequence',
     'continuous_rabi_sequence',
+    'continuous_ramsey_sequence',
+    'continuous_cpmg_sequence',
     # Fourier integrals
     'cj',
     'sj',

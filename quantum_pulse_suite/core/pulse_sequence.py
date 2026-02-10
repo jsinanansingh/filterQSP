@@ -656,3 +656,94 @@ def continuous_rabi_sequence(omega: float, tau: float, axis: Optional[List[float
     seq = ContinuousPulseSequence()
     seq.add_continuous_pulse(omega, axis, delta, tau)
     return seq
+
+
+def continuous_ramsey_sequence(omega: float, tau: float, delta: float = 0.0,
+                                axis: Optional[List[float]] = None) -> ContinuousPulseSequence:
+    """
+    Create a continuous Ramsey sequence: π/2 pulse - τ free evolution - π/2 pulse.
+
+    All pulses are finite-duration continuous pulses. Pulse durations are
+    computed from the Rabi frequency as τ_pulse = π/(2·omega).
+
+    Parameters
+    ----------
+    omega : float
+        Rabi frequency during pulses
+    tau : float
+        Free evolution time between pulses
+    delta : float
+        Detuning
+    axis : list, optional
+        Rotation axis for pulses, defaults to [1, 0, 0] (x-axis)
+
+    Returns
+    -------
+    ContinuousPulseSequence
+        The continuous Ramsey sequence
+    """
+    if omega <= 0:
+        raise ValueError("Rabi frequency omega must be positive")
+    if axis is None:
+        axis = [1, 0, 0]
+
+    tau_pi2 = np.pi / (2 * omega)
+
+    seq = ContinuousPulseSequence()
+    seq.add_continuous_pulse(omega, axis, delta, tau_pi2)       # π/2 pulse
+    seq.add_continuous_pulse(0.0, [1, 0, 0], delta, tau)        # Free evolution
+    seq.add_continuous_pulse(omega, axis, delta, tau_pi2)       # π/2 pulse
+    return seq
+
+
+def continuous_cpmg_sequence(omega: float, tau: float, n_pulses: int,
+                              delta: float = 0.0,
+                              axis: Optional[List[float]] = None) -> ContinuousPulseSequence:
+    """
+    Create a continuous CPMG sequence.
+
+    Structure: π/2 x-pulse - (τ/2n free - π refocus - τ/2n free)×n - π/2 x-pulse
+
+    All pulses are finite-duration continuous pulses. Pulse durations are
+    computed from the Rabi frequency.
+
+    Parameters
+    ----------
+    omega : float
+        Rabi frequency during pulses
+    tau : float
+        Total free evolution time
+    n_pulses : int
+        Number of refocusing π pulses
+    delta : float
+        Detuning
+    axis : list, optional
+        Rotation axis for refocusing pulses, defaults to [0, 1, 0]
+        (y-axis, CPMG convention)
+
+    Returns
+    -------
+    ContinuousPulseSequence
+        The continuous CPMG sequence
+    """
+    if omega <= 0:
+        raise ValueError("Rabi frequency omega must be positive")
+    if n_pulses < 1:
+        raise ValueError("n_pulses must be at least 1")
+    if axis is None:
+        axis = [0, 1, 0]
+
+    tau_pi2 = np.pi / (2 * omega)
+    tau_pi = np.pi / omega
+    interval = tau / (2 * n_pulses)
+
+    seq = ContinuousPulseSequence()
+    seq.add_continuous_pulse(omega, [1, 0, 0], delta, tau_pi2)  # Initial π/2 x-pulse
+
+    for _ in range(n_pulses):
+        seq.add_continuous_pulse(0.0, [1, 0, 0], delta, interval)  # Free evolution
+        seq.add_continuous_pulse(omega, axis, delta, tau_pi)        # π refocusing pulse
+        seq.add_continuous_pulse(0.0, [1, 0, 0], delta, interval)  # Free evolution
+
+    seq.add_continuous_pulse(omega, [1, 0, 0], delta, tau_pi2)  # Final π/2 x-pulse
+    return seq

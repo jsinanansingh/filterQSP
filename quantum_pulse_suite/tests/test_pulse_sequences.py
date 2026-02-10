@@ -63,15 +63,34 @@ class TestRamseyFilterFunction(unittest.TestCase):
         ff = seq.get_filter_function_calculator()
 
         # For a simple Ramsey sequence, F(ω) should have zeros near ω = 2πn/τ
-        # Test at the first zero (approximately)
-        zero_freq = 2 * np.pi / tau
-        freqs_near_zero = np.array([zero_freq * 0.95, zero_freq, zero_freq * 1.05])
+        # Use midpoints between adjacent zeros as neighbors (where susceptibility peaks)
+        for n in range(1, 11):
+            zero_freq = 2 * np.pi * n / tau
+            left_mid = 2 * np.pi * (n - 0.5) / tau
+            right_mid = 2 * np.pi * (n + 0.5) / tau
+            freqs = np.array([left_mid, zero_freq, right_mid])
 
-        susceptibility = ff.noise_susceptibility(freqs_near_zero)
+            susceptibility = ff.noise_susceptibility(freqs)
 
-        # The middle value should be a local minimum
-        self.assertLess(susceptibility[1], susceptibility[0])
-        self.assertLess(susceptibility[1], susceptibility[2])
+            # The zero should be a local minimum compared to the midpoints
+            self.assertLess(susceptibility[1], susceptibility[0],
+                            msg=f"Zero at n={n}: susceptibility at zero not less than left midpoint")
+            self.assertLess(susceptibility[1], susceptibility[2],
+                            msg=f"Zero at n={n}: susceptibility at zero not less than right midpoint")
+
+    def test_ramsey_with_formula(self):
+        """Test Ramsey noise susceptibility matches 4 sin^2(wt/2) / w^2."""
+        for tau in [0.5, 1.0, 2.0]:
+            seq = ramsey_sequence(tau=tau, delta=0.0)
+            ff = seq.get_filter_function_calculator()
+
+            freqs = np.linspace(0.5, 80, 300)
+            numerical = ff.noise_susceptibility(freqs)
+            analytical = 4 * np.sin(freqs * tau / 2)**2 / freqs**2
+
+            diff = np.abs(numerical - analytical)
+            self.assertTrue(np.all(diff < 1e-12),
+                            msg=f"tau={tau}: max diff {np.max(diff):.2e}")
 
     def test_ramsey_total_duration(self):
         """Test that Ramsey sequence has correct total duration."""
@@ -167,6 +186,119 @@ class TestCPMGFilterFunction(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(Fx)))
         self.assertTrue(np.all(np.isfinite(Fy)))
         self.assertTrue(np.all(np.isfinite(Fz)))
+
+    def test_cpmg_with_formula(self):
+        """Test CPMG noise susceptibility matches the QSP analytical formula.
+
+        For CPMG-n with instantaneous pi-pulses and total free evolution tau,
+        the noise susceptibility decomposes into orthogonal Fz (first segment)
+        and Fy (subsequent segments) components:
+
+            S(w) = (4 sin^2(wh/2) / w^2) * (1 + |sum_{k=1}^{2n-1} y_k e^{iwkh}|^2)
+
+        where h = tau/(2n) and y_k follows the toggling-frame sign pattern
+        {-1,-1,+1,+1,-1,-1,...} in alternating pairs.
+        """
+        for n_pulses in [1, 2, 4, 8]:
+            for tau in [0.5, 1.0, 2.0]:
+                seq = cpmg_sequence(tau=tau, n_pulses=n_pulses, delta=0.0)
+                ff = seq.get_filter_function_calculator()
+
+                freqs = np.linspace(0.5, 80, 300)
+                numerical = ff.noise_susceptibility(freqs)
+
+                h = tau / (2 * n_pulses)
+
+                # Build toggling-frame sign pattern
+                y_vals = [1]  # segment 0 (contributes to Fz)
+                sign = -1
+                for _ in range(n_pulses):
+                    y_vals.extend([sign, sign])
+                    sign *= -1
+                y_vals = y_vals[:2 * n_pulses]
+
+                # Compute analytical formula
+                alpha_sq = 4 * np.sin(freqs * h / 2)**2 / freqs**2
+                S = np.zeros(len(freqs), dtype=complex)
+                for k in range(1, 2 * n_pulses):
+                    S += y_vals[k] * np.exp(1j * freqs * k * h)
+                analytical = alpha_sq * (1 + np.abs(S)**2)
+
+                diff = np.abs(numerical - analytical)
+                self.assertTrue(
+                    np.all(diff < 1e-12),
+                    msg=f"n={n_pulses}, tau={tau}: max diff {np.max(diff):.2e}")
+
+    def test_continuous_cpmg_fz_with_formula(self):
+        """Test finite-duration CPMG |Fz(w)|^2 matches the closed-form formula.
+
+        For CPMG-n with finite-duration pi-pulses (Rabi frequency Omega,
+        pulse duration t_p = pi/Omega) and free-evolution half-intervals
+        h = tau/(2n), the dephasing filter function factorises as:
+
+            |Fz(w)|^2 = |U(w)|^2 * |G(w)|^2
+
+        where the unit-cell Fourier transform is
+
+            U(w) = A(w) + B(w) - C(w)
+
+        with
+            A(w) = (e^{iwh} - 1) / (iw)                  [first free segment]
+            B(w) = e^{iwh} * P(w)                          [pi pulse]
+            C(w) = e^{iw(h + t_p)} * (e^{iwh} - 1) / (iw) [second free segment]
+
+        P(w) is the Fourier transform of cos(Omega*s) over [0, t_p]:
+            P(w) = [(e^{i(w+O)t_p} - 1) / (i(w+O)) + (e^{i(w-O)t_p} - 1) / (i(w-O))] / 2
+
+        and the alternating geometric sum is
+
+            G(w) = sum_{k=0}^{n-1} (-1)^k e^{iwk T_p},   T_p = 2h + t_p
+        """
+        for n_pulses in [1, 2, 4, 8]:
+            for tau in [0.5, 1.0, 2.0]:
+                for omega_rabi in [5 * np.pi, 20 * np.pi, 100 * np.pi]:
+                    t_p = np.pi / omega_rabi
+                    h = tau / (2 * n_pulses)
+                    T_p = 2 * h + t_p
+
+                    # Build core CPMG (no pi/2 bookends)
+                    seq = ContinuousPulseSequence()
+                    for _ in range(n_pulses):
+                        seq.add_continuous_pulse(0.0, [1, 0, 0], 0.0, h)
+                        seq.add_continuous_pulse(omega_rabi, [0, 1, 0], 0.0, t_p)
+                        seq.add_continuous_pulse(0.0, [1, 0, 0], 0.0, h)
+
+                    ff = seq.get_filter_function_calculator()
+                    freqs = np.linspace(0.5, 80, 300)
+                    numerical_fz = np.abs(ff.filter_function(freqs)[2])**2
+
+                    # Closed-form unit-cell contribution
+                    w = freqs
+                    A = (np.exp(1j * w * h) - 1) / (1j * w)
+                    wp = w + omega_rabi
+                    wm = w - omega_rabi
+                    I1 = (np.exp(1j * wp * t_p) - 1) / (1j * wp)
+                    I2 = np.where(
+                        np.abs(wm) < 1e-12,
+                        t_p + 0j,
+                        (np.exp(1j * wm * t_p) - 1) / (1j * wm),
+                    )
+                    B = np.exp(1j * w * h) * (I1 + I2) / 2
+                    C = np.exp(1j * w * (h + t_p)) * (np.exp(1j * w * h) - 1) / (1j * w)
+                    unit_cell = A + B - C
+
+                    # Alternating geometric sum
+                    G = np.zeros(len(w), dtype=complex)
+                    for k in range(n_pulses):
+                        G += (-1)**k * np.exp(1j * w * k * T_p)
+
+                    analytical = np.abs(unit_cell)**2 * np.abs(G)**2
+
+                    diff = np.abs(numerical_fz - analytical)
+                    self.assertTrue(
+                        np.all(diff < 1e-10),
+                        msg=(f"n={n_pulses}, tau={tau}, omega={omega_rabi/np.pi:.0f}*pi: "
+                             f"max diff {np.max(diff):.2e}"))
 
     def test_cpmg_has_peak_structure(self):
         """Test that CPMG filter function has a clear peak structure.

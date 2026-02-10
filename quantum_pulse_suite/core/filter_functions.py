@@ -48,14 +48,14 @@ def cj(w: Union[float, np.ndarray], t: float, omega: float, tau: float,
 
     if np.any(resonance_mask):
         # Use the limiting form at resonance
-        result[resonance_mask] = (1j * np.exp(1j * t * omega) *
+        result[resonance_mask] = (np.exp(1j * t * omega) *
                                    (1j - 1j * np.exp(2j * tau * omega) +
                                     2 * tau * omega) / (4 * omega))
 
     if np.any(off_resonance_mask):
         w_off = w[off_resonance_mask]
         num = (1j * np.exp(1j * w_off * t) *
-               (w_off - 1j * np.exp(1j * w_off * tau) *
+               (w_off - np.exp(1j * w_off * tau) *
                 (w_off * np.cos(omega * tau) - 1j * omega * np.sin(omega * tau))))
         den = w_off**2 - omega**2
         result[off_resonance_mask] = num / den
@@ -222,7 +222,7 @@ class InstantaneousFilterFunction(FilterFunction):
 
             curr_time = t_end - tau + tau  # Update to end time of segment
 
-        return np.real(Fx_total), np.real(Fy_total), np.real(Fz_total)
+        return Fx_total, Fy_total, Fz_total
 
 
 class ContinuousFilterFunction(FilterFunction):
@@ -287,7 +287,7 @@ class ContinuousFilterFunction(FilterFunction):
 
             curr_time += tau
 
-        return np.real(Fx_total), np.real(Fy_total), np.real(Fz_total)
+        return Fx_total, Fy_total, Fz_total
 
 
 class ColoredNoisePSD:
