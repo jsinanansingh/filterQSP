@@ -191,13 +191,13 @@ class TestCPMGFilterFunction(unittest.TestCase):
         """Test CPMG noise susceptibility matches the QSP analytical formula.
 
         For CPMG-n with instantaneous pi-pulses and total free evolution tau,
-        the noise susceptibility decomposes into orthogonal Fz (first segment)
-        and Fy (subsequent segments) components:
+        all 2n segments contribute to Fy in the toggling frame (after the
+        initial pi/2 prep pulse maps sigma_z to sigma_y):
 
-            S(w) = (4 sin^2(wh/2) / w^2) * (1 + |sum_{k=1}^{2n-1} y_k e^{iwkh}|^2)
+            S(w) = (4 sin^2(wh/2) / w^2) * |sum_{k=0}^{2n-1} y_k e^{iwkh}|^2
 
         where h = tau/(2n) and y_k follows the toggling-frame sign pattern
-        {-1,-1,+1,+1,-1,-1,...} in alternating pairs.
+        {+1,-1,-1,+1,+1,-1,-1,...} in alternating pairs.
         """
         for n_pulses in [1, 2, 4, 8]:
             for tau in [0.5, 1.0, 2.0]:
@@ -210,19 +210,19 @@ class TestCPMGFilterFunction(unittest.TestCase):
                 h = tau / (2 * n_pulses)
 
                 # Build toggling-frame sign pattern
-                y_vals = [1]  # segment 0 (contributes to Fz)
+                y_vals = [1]  # segment 0 (contributes to Fy after pi/2 prep)
                 sign = -1
                 for _ in range(n_pulses):
                     y_vals.extend([sign, sign])
                     sign *= -1
                 y_vals = y_vals[:2 * n_pulses]
 
-                # Compute analytical formula
+                # Compute analytical formula — all segments in the sum
                 alpha_sq = 4 * np.sin(freqs * h / 2)**2 / freqs**2
                 S = np.zeros(len(freqs), dtype=complex)
-                for k in range(1, 2 * n_pulses):
+                for k in range(2 * n_pulses):
                     S += y_vals[k] * np.exp(1j * freqs * k * h)
-                analytical = alpha_sq * (1 + np.abs(S)**2)
+                analytical = alpha_sq * np.abs(S)**2
 
                 diff = np.abs(numerical - analytical)
                 self.assertTrue(

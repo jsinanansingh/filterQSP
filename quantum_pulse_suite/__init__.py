@@ -106,6 +106,10 @@ from .core import (
     ContinuousFilterFunction,
     # Noise PSD factory
     ColoredNoisePSD,
+    # FFT filter function
+    fft_filter_function,
+    noise_susceptibility_from_matrix,
+    bloch_components_from_matrix,
     # Noise generation
     generate_time_series,
     noise_interpolation,
@@ -179,6 +183,10 @@ __all__ = [
     'generate_time_series',
     'noise_interpolation',
     'NoiseGenerator',
+    # FFT filter function
+    'fft_filter_function',
+    'noise_susceptibility_from_matrix',
+    'bloch_components_from_matrix',
     # Analysis
     'bloch_vector_from_operator',
     'NumericalEvolution',

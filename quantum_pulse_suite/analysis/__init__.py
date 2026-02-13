@@ -28,6 +28,15 @@ from .global_phase_spectroscopy import (
     plot_gps_filter_functions,
 )
 
+from .detuning_optimization import (
+    compute_signal,
+    compute_noise_variance,
+    compute_signal_slope,
+    frequency_estimation_variance,
+    optimize_detuning,
+    OptimizationResult,
+)
+
 __all__ = [
     'bloch_vector_from_operator',
     'NumericalEvolution',
@@ -45,4 +54,11 @@ __all__ = [
     'GPSFilterFunction',
     'gps_filter_functions_comparison',
     'plot_gps_filter_functions',
+    # Detuning optimization
+    'compute_signal',
+    'compute_noise_variance',
+    'compute_signal_slope',
+    'frequency_estimation_variance',
+    'optimize_detuning',
+    'OptimizationResult',
 ]

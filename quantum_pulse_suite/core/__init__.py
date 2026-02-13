@@ -66,6 +66,12 @@ from .filter_functions import (
     ColoredNoisePSD,
 )
 
+from .fft_filter_function import (
+    fft_filter_function,
+    noise_susceptibility_from_matrix,
+    bloch_components_from_matrix,
+)
+
 from .noise import (
     generate_time_series,
     noise_interpolation,
@@ -156,4 +162,8 @@ __all__ = [
     'multilevel_spin_echo',
     'multilevel_cpmg',
     'DifferentialSpectroscopySequence',
+    # FFT filter function
+    'fft_filter_function',
+    'noise_susceptibility_from_matrix',
+    'bloch_components_from_matrix',
 ]

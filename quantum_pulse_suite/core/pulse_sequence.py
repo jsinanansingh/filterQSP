@@ -344,9 +344,6 @@ class InstantaneousPulseSequence(PulseSequence):
         g_prev = 0.0
         theta = 0.0
 
-        # Track whether we've seen an x-rotation yet
-        first_rotation = True
-
         for element in self._elements:
             if isinstance(element, FreeEvolution):
                 delta = element.delta
@@ -354,11 +351,7 @@ class InstantaneousPulseSequence(PulseSequence):
                 theta = 0.0  # No rotation during free evolution
 
                 # Store polynomial info for filter functions
-                if first_rotation:
-                    theta = 0.0
-                    self._poly_list.append((0, 0, theta, tau, curr_time + tau))
-                else:
-                    self._poly_list.append((f_prev, g_prev, theta, tau, curr_time + tau))
+                self._poly_list.append((f_prev, g_prev, theta, tau, curr_time + tau))
 
                 # Create polynomial functions for this segment using function factories
                 def make_F(delta, tau, t0, f_prev):
@@ -394,7 +387,6 @@ class InstantaneousPulseSequence(PulseSequence):
 
                 f_prev = f_new
                 g_prev = g_new
-                first_rotation = False
 
         self._polynomials_computed = True
         return self._polynomial_segments

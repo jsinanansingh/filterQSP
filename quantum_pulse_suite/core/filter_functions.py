@@ -198,29 +198,25 @@ class InstantaneousFilterFunction(FilterFunction):
 
         curr_time = 0.0
 
-        for index, (f, g, theta, tau, t_end) in enumerate(self._poly_list):
+        for f, g, theta, tau, t_end in self._poly_list:
             factor = self._compute_factor(frequencies, curr_time, tau)
 
-            if index == 0:
-                # First segment: only Fz contribution
-                Fz_total += factor
-            else:
-                # Compute expressions for x, y, z components
-                cos_theta = np.cos(theta)
-                sin_theta = np.sin(theta)
+            # Compute Bloch component expressions from Cayley-Klein params
+            cos_theta = np.cos(theta)
+            sin_theta = np.sin(theta)
 
-                # Expression: 2*cos(theta)*f*g + sin(theta)*(f^2 - conj(g)^2)
-                expr = 2 * cos_theta * f * g + sin_theta * (f**2 - np.conj(g)**2)
+            # Rx - iRy = -i(2cos(θ)fg* + sin(θ)(f² - g*²))  [paper eq (41)]
+            expr = 2 * cos_theta * f * np.conj(g) + sin_theta * (f**2 - np.conj(g)**2)
 
-                Fx_total += factor * np.real(1j * expr)
-                Fy_total += factor * np.imag(1j * expr)
+            Fx_total += factor * np.real(-1j * expr)
+            Fy_total += factor * np.imag(1j * expr)
 
-                # Fz: cos(theta)*(|f|^2 - |g|^2) - sin(theta)*(f*g + conj(f)*conj(g))
-                fz_expr = (cos_theta * (f * np.conj(f) - g * np.conj(g)) -
-                           sin_theta * (f * g + np.conj(f) * np.conj(g)))
-                Fz_total += factor * fz_expr
+            # Rz = cos(θ)(|f|² - |g|²) - sin(θ)(fg + f*g*)
+            fz_expr = (cos_theta * (f * np.conj(f) - g * np.conj(g)) -
+                       sin_theta * (f * g + np.conj(f) * np.conj(g)))
+            Fz_total += factor * fz_expr
 
-            curr_time = t_end - tau + tau  # Update to end time of segment
+            curr_time = t_end
 
         return Fx_total, Fy_total, Fz_total
 
@@ -242,9 +238,63 @@ class ContinuousFilterFunction(FilterFunction):
     def __init__(self, poly_list: List[Tuple]):
         self._poly_list = poly_list
 
+    def _compute_z_and_fz(self, frequencies: np.ndarray):
+        """Compute Z(+w), Z(-w), and Fz(w) for the filter function.
+
+        Z(w) = R_x(w) - i*R_y(w) is the combined xy Fourier component.
+        Uses c_j(-w) = conj(c_j(w)) to evaluate at negative frequencies
+        without extra integration.
+
+        Returns (Z_plus, Z_minus, Fz) complex arrays.
+        """
+        n = len(frequencies)
+        Z_plus = np.zeros(n, dtype=complex)
+        Z_minus = np.zeros(n, dtype=complex)
+        Fz_total = np.zeros(n, dtype=complex)
+
+        curr_time = 0.0
+
+        for f, g, omega, n_x, n_y, n_z, tau in self._poly_list:
+            phi = np.arctan2(-n_y, n_x) if (n_x != 0 or n_y != 0) else 0.0
+            phase_p = np.exp(1j * phi)
+            phase_m = np.exp(-1j * phi)
+
+            # Fourier integrals at +w
+            c_plus = np.array([cj(w, curr_time, omega, tau) for w in frequencies])
+            s_plus = np.array([sj(w, curr_time, omega, tau) for w in frequencies])
+
+            # At -w: c_j(-w) = conj(c_j(w)) for real cos/sin kernels
+            c_minus = np.conj(c_plus)
+            s_minus = np.conj(s_plus)
+
+            # Rx-iRy expression: -i * expr
+            # Sign on g*² term matches instantaneous convention (f²-g*²)
+            # because code tracks U_code = U_phys†, not U_phys
+            xy_common = phase_p * f**2 - phase_m * np.conj(g)**2
+            expr_plus = 2 * c_plus * f * np.conj(g) + s_plus * xy_common
+            expr_minus = 2 * c_minus * f * np.conj(g) + s_minus * xy_common
+
+            Z_plus += -1j * expr_plus
+            Z_minus += -1j * expr_minus
+
+            # Fz: direct Fourier transform of Rz(t) [paper eq (44)]
+            fz_common = phase_p * f * g + phase_m * np.conj(f) * np.conj(g)
+            Fz_total += (c_plus * (f * np.conj(f) - g * np.conj(g)) -
+                         s_plus * fz_common)
+
+            curr_time += tau
+
+        return Z_plus, Z_minus, Fz_total
+
     def filter_function(self, frequencies: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Compute filter function components at given frequencies.
+        Compute filter function Bloch components at given frequencies.
+
+        For continuous pulses, R_k(t) oscillates within segments, so
+        recovering individual R_x(w) and R_y(w) requires evaluating the
+        combined Z(w) = R_x(w) - i*R_y(w) at both +w and -w:
+            R_x(w) = (Z(w) + Z(-w)*) / 2
+            R_y(w) = i*(Z(w) - Z(-w)*) / 2
 
         Parameters
         ----------
@@ -254,40 +304,40 @@ class ContinuousFilterFunction(FilterFunction):
         Returns
         -------
         tuple
-            (Fx, Fy, Fz) arrays
+            (Fx, Fy, Fz) complex arrays — the Bloch-component Fourier
+            transforms R_x(w), R_y(w), R_z(w)
         """
         frequencies = np.asarray(frequencies)
-        Fx_total = np.zeros(len(frequencies), dtype=complex)
-        Fy_total = np.zeros(len(frequencies), dtype=complex)
-        Fz_total = np.zeros(len(frequencies), dtype=complex)
+        Z_plus, Z_minus, Fz = self._compute_z_and_fz(frequencies)
 
-        curr_time = 0.0
+        # Recover individual components from Z(+w) and Z(-w)
+        # Using: R_k(-w) = R_k(w)* for real R_k(t)
+        Z_neg_star = np.conj(Z_minus)  # Z(-w)* = R_x(w) + i*R_y(w)
+        Fx = (Z_plus + Z_neg_star) / 2
+        Fy = 1j * (Z_plus - Z_neg_star) / 2
 
-        for f, g, omega, n_x, n_y, n_z, tau in self._poly_list:
-            # Compute phi from axis components (for XY plane projection)
-            phi = np.arctan2(-n_y, n_x) if (n_x != 0 or n_y != 0) else 0.0
+        return Fx, Fy, Fz
 
-            # Compute cj and sj for each frequency
-            c_vals = np.array([cj(w, curr_time, omega, tau) for w in frequencies])
-            s_vals = np.array([sj(w, curr_time, omega, tau) for w in frequencies])
+    def noise_susceptibility(self, frequencies: np.ndarray) -> np.ndarray:
+        """
+        Compute total noise susceptibility |F(w)|^2.
 
-            # Common expression for Fx, Fy
-            expr = (c_vals * f * np.conj(g) +
-                    s_vals * (np.exp(1j * phi) * f**2 +
-                             np.exp(-1j * phi) * np.conj(g)**2))
+        Uses the identity:
+            |R_x(w)|^2 + |R_y(w)|^2 = (|Z(w)|^2 + |Z(-w)|^2) / 2
 
-            Fx_total += np.real(-1j * expr)
-            Fy_total += np.imag(1j * expr)
+        Parameters
+        ----------
+        frequencies : np.ndarray
+            Angular frequencies
 
-            # Fz expression
-            fz_expr = (c_vals * (f * np.conj(f) - g * np.conj(g)) -
-                       s_vals * (np.exp(1j * phi) * f * g +
-                                np.exp(-1j * phi) * np.conj(f) * np.conj(g)))
-            Fz_total += fz_expr
-
-            curr_time += tau
-
-        return Fx_total, Fy_total, Fz_total
+        Returns
+        -------
+        np.ndarray
+            Total filter function magnitude squared
+        """
+        frequencies = np.asarray(frequencies)
+        Z_plus, Z_minus, Fz = self._compute_z_and_fz(frequencies)
+        return (np.abs(Z_plus)**2 + np.abs(Z_minus)**2) / 2 + np.abs(Fz)**2
 
 
 class ColoredNoisePSD:
