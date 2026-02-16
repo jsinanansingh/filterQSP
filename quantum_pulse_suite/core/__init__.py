@@ -85,6 +85,30 @@ from .three_level_filter import (
     Ff_analytic,
 )
 
+from .spin_displacement import (
+    spin_j_operators,
+    spin_displacement_hamiltonian,
+    spin_displacement_pulse,
+    snap_gate,
+    su2_scaling_factor,
+)
+
+from .qudit_pulse_sequence import (
+    QuditPulseElement,
+    SpinDisplacementElement,
+    InstantSpinDisplacement,
+    QuditFreeEvolution,
+    QuditPulseSequence,
+)
+
+from .irrep_decomposition import (
+    angular_momentum_irrep_projectors,
+    irrep_resolved_filter_function,
+    transition_resolved_filter_function,
+    ggm_component_filter_functions,
+    irrep_multiplicities,
+)
+
 from .multilevel import (
     # Multi-level pulse elements
     MultiLevelPulseElement,
@@ -169,6 +193,24 @@ __all__ = [
     'multilevel_spin_echo',
     'multilevel_cpmg',
     'DifferentialSpectroscopySequence',
+    # Spin-displacement pulses
+    'spin_j_operators',
+    'spin_displacement_hamiltonian',
+    'spin_displacement_pulse',
+    'snap_gate',
+    'su2_scaling_factor',
+    # Qudit pulse sequences
+    'QuditPulseElement',
+    'SpinDisplacementElement',
+    'InstantSpinDisplacement',
+    'QuditFreeEvolution',
+    'QuditPulseSequence',
+    # Irrep decomposition
+    'angular_momentum_irrep_projectors',
+    'irrep_resolved_filter_function',
+    'transition_resolved_filter_function',
+    'ggm_component_filter_functions',
+    'irrep_multiplicities',
     # FFT filter function
     'fft_filter_function',
     'noise_susceptibility_from_matrix',
