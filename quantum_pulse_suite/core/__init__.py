@@ -78,6 +78,13 @@ from .noise import (
     NoiseGenerator,
 )
 
+from .three_level_filter import (
+    fft_three_level_filter,
+    analytic_three_level_filter,
+    three_level_noise_variance,
+    Ff_analytic,
+)
+
 from .multilevel import (
     # Multi-level pulse elements
     MultiLevelPulseElement,
@@ -166,4 +173,9 @@ __all__ = [
     'fft_filter_function',
     'noise_susceptibility_from_matrix',
     'bloch_components_from_matrix',
+    # Three-level clock filter functions
+    'fft_three_level_filter',
+    'analytic_three_level_filter',
+    'three_level_noise_variance',
+    'Ff_analytic',
 ]
