@@ -22,8 +22,11 @@ from matplotlib import rcParams
 from matplotlib.lines import Line2D
 from pathlib import Path
 from scipy.integrate import simpson
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 
 import sys
+sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from quantum_pulse_suite import (
@@ -180,6 +183,33 @@ def compute_chi(seq, S_func):
     suscept = noise_susceptibility_from_matrix(F_mat)
     S_vals = S_func(freqs)
     return float(2 * simpson(S_vals * suscept, x=freqs) / np.pi)
+
+
+def _build_noise_func(noise_idx):
+    """Reconstruct noise PSD from index (picklable)."""
+    label, kind, param, marker, family = NOISE_DEFS[noise_idx]
+    if kind == 'pl':
+        return ColoredNoisePSD.generic_power_law(
+            amplitude=1.0, exponent=param, cutoff=1e-10)
+    elif kind == 'lor':
+        return ColoredNoisePSD.lorentzian(amplitude=1.0, gamma=param)
+    else:
+        w0 = param
+        def psd(w, w0_=w0):
+            w = np.asarray(w)
+            return np.exp(-((w - w0_)**2) / (2*(0.3*w0_)**2))
+        return psd
+
+
+def _run_one(args):
+    """Worker: optimize a single (protocol, noise) pair."""
+    typ, n, ni, noise_label = args
+    builder = get_seq_builder(typ, n)
+    S_func = _build_noise_func(ni)
+    result = optimize_detuning(
+        builder, OPT_FREQS, S_func, B_lab=None,
+        delta_range=DELTA_RANGE, n_grid=N_GRID)
+    return (typ, n, ni, noise_label, result.delta_opt, result.min_variance)
 
 
 # =============================================================================
@@ -445,40 +475,60 @@ def main():
 
     # ------------------------------------------------------------------
     # Step 2: Optimize detuning for each (protocol, noise) pair
+    #         - Skip instantaneous CPMG n>=1 (use delta=0 fallback)
+    #         - Parallelize remaining pairs across CPU cores
     # ------------------------------------------------------------------
     print()
     print('=' * 72)
-    print('Step 2: Optimizing detuning (this may take a few minutes) ...')
+    print('Step 2: Optimizing detuning (parallel) ...')
     print('=' * 72)
 
     delta_opts = {}    # key -> array of optimal deltas
     var_opts = {}      # key -> array of optimal variances
 
-    total = len(unique_keys) * n_noise
-    count = 0
-
+    # Instantaneous CPMG n>=1: skip optimization, use delta=0
     for typ, n in unique_keys:
         key = (typ, n)
-        builder = get_seq_builder(typ, n)
+        if typ == 'inst' and n >= 1:
+            delta_opts[key] = np.zeros(n_noise)
+            var_opts[key] = np.full(n_noise, np.inf)
+            print(f'  {str(key):<20s}  skipped (inst CPMG n>=1, using delta=0)')
 
-        d_arr = np.zeros(n_noise)
-        v_arr = np.full(n_noise, np.inf)
+    # Collect jobs for protocols that need optimization
+    jobs = []
+    for typ, n in unique_keys:
+        key = (typ, n)
+        if key in delta_opts:
+            continue  # already handled
+        for ni, (noise_label, _, _, _) in enumerate(noise_shapes):
+            jobs.append((typ, n, ni, noise_label))
 
-        for ni, (noise_label, S_func, _, _) in enumerate(noise_shapes):
-            count += 1
-            print(f'  [{count:3d}/{total}] {str(key):<20s} | {noise_label:<25s} ... ',
-                  end='', flush=True)
+    print(f'  Running {len(jobs)} optimizations across '
+          f'{os.cpu_count()} cores ...')
 
-            result = optimize_detuning(
-                builder, OPT_FREQS, S_func, B_lab=None,
-                delta_range=DELTA_RANGE, n_grid=N_GRID)
+    n_workers = min(os.cpu_count() or 4, len(jobs))
+    results_list = []
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_run_one, job): job for job in jobs}
+        for future in as_completed(futures):
+            res = future.result()
+            typ, n, ni, noise_label, d_opt, v_opt = res
+            results_list.append(res)
+            print(f'  ({typ!r}, {n}){"":<12s} | {noise_label:<25s} '
+                  f'delta_opt={d_opt:.4f}  var={v_opt:.4e}')
 
-            d_arr[ni] = result.delta_opt
-            v_arr[ni] = result.min_variance
-            print(f'delta_opt={result.delta_opt:.4f}  var={result.min_variance:.4e}')
+    # Gather results into arrays
+    for typ, n in unique_keys:
+        key = (typ, n)
+        if key in delta_opts:
+            continue
+        delta_opts[key] = np.zeros(n_noise)
+        var_opts[key] = np.full(n_noise, np.inf)
 
-        delta_opts[key] = d_arr
-        var_opts[key] = v_arr
+    for typ, n, ni, _, d_opt, v_opt in results_list:
+        key = (typ, n)
+        delta_opts[key][ni] = d_opt
+        var_opts[key][ni] = v_opt
 
     # ------------------------------------------------------------------
     # Step 3: Recompute chi at optimized delta
@@ -491,6 +541,11 @@ def main():
     chi_optimized = {}
     for typ, n in unique_keys:
         key = (typ, n)
+        # Inst CPMG n>=1: delta_opt=0, so chi_optimized == chi_baseline
+        if typ == 'inst' and n >= 1:
+            chi_optimized[key] = chi_baseline[key].copy()
+            print(f'  {str(key):<20s}  (delta=0 fallback, same as baseline)')
+            continue
         builder = get_seq_builder(typ, n)
         chi_vals = np.zeros(n_noise)
 

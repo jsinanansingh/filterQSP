@@ -149,7 +149,10 @@ class GlobalPhaseSpectroscopySequence:
             self._probe,
             self._omega,
             self._n_cycles,
-            self._delta
+            self._delta,
+            polynomial_segments=self._sequence._polynomial_segments,
+            f_final=self._sequence._f_final,
+            g_final=self._sequence._g_final,
         )
 
     def evolve_state(self, initial_state: np.ndarray) -> np.ndarray:
@@ -249,8 +252,12 @@ class GPSFilterFunction(SubspaceFilterFunction):
     """
 
     def __init__(self, poly_list, subspace: Subspace,
-                 omega: float, n_cycles: int, delta: float = 0.0):
-        super().__init__(poly_list, subspace, continuous=True)
+                 omega: float, n_cycles: int, delta: float = 0.0,
+                 polynomial_segments=None,
+                 f_final: complex = 1.0, g_final: complex = 0.0):
+        super().__init__(poly_list, subspace, continuous=True,
+                         polynomial_segments=polynomial_segments,
+                         f_final=f_final, g_final=g_final)
         self._omega = omega
         self._n_cycles = n_cycles
         self._delta = delta
@@ -267,18 +274,10 @@ class GPSFilterFunction(SubspaceFilterFunction):
     def filter_function_for_measurement(self, frequencies: np.ndarray,
                                          measurement_type: str = 'z') -> np.ndarray:
         """
-        Compute filter function for a specific clock measurement using Kubo formula.
+        Compute filter function for a specific clock measurement.
 
-        The filter function depends on which observable is measured
-        on the clock transition after the GPS sequence.
-
-        For the 3-level clock system:
-        - Probe drive acts on |g> <-> |e> subspace
-        - Measurement is on |g> <-> |m> (clock) subspace
-        - The |g> phase from probe dynamics appears in clock coherence
-
-        The Kubo formula gives: |F|^2 - (B·F)^2
-        where B is the measurement Bloch vector in the interaction frame.
+        Delegates to the parent's measurement_sensitivity() which uses
+        the Fe/Phi decomposition for the three-level clock system.
 
         Parameters
         ----------
@@ -290,110 +289,22 @@ class GPSFilterFunction(SubspaceFilterFunction):
         Returns
         -------
         np.ndarray
-            Filter function |F(omega)|^2 for this measurement
+            Filter function Fe(omega) for this measurement
         """
-        Fx, Fy, Fz = self.filter_function(frequencies)
+        m_z = self._measurement_type_to_mz(measurement_type)
+        return self.measurement_sensitivity(frequencies, m_z)
 
-        # Get final probe rotation from polynomials
-        B = self._get_effective_measurement_vector(measurement_type)
-
-        # Kubo formula: |F|^2 - (B·F)^2
-        F_mag_sq = Fx**2 + Fy**2 + Fz**2
-        B_dot_F = B[0]*Fx + B[1]*Fy + B[2]*Fz
-        sensitivity = F_mag_sq - B_dot_F**2
-
-        return sensitivity
-
-    def _get_effective_measurement_vector(self, measurement_type: str) -> np.ndarray:
-        """
-        Get the effective measurement Bloch vector in the probe interaction frame.
-
-        For 3-level GPS:
-        - The probe drive creates a rotation R on the {|g>, |e>} subspace
-        - The clock measurement (on {|g>, |m>}) sees |g> as rotated
-        - For complete Rabi cycles, R ≈ I, so B ≈ measurement direction
-
-        The effective B accounts for how the clock measurement projects
-        onto the probe dynamics.
-
-        Parameters
-        ----------
-        measurement_type : str
-            Type of clock measurement
-
-        Returns
-        -------
-        np.ndarray
-            Effective Bloch vector B = (Bx, By, Bz)
-        """
-        # Get final (f, g) from probe sequence
-        if self._poly_list:
-            f, g, omega, nx, ny, nz, tau = self._poly_list[-1]
-            # For complete Rabi cycles, f ≈ ±1, g ≈ 0
-            # Compute effective rotation
-            f_final = self._compute_final_f(f, g, omega, tau)
-            g_final = self._compute_final_g(f, g, omega, tau)
-        else:
-            f_final, g_final = 1.0, 0.0
-
-        # Compute SO(3) rotation from SU(2) parameters
-        R = self._su2_to_so3(f_final, g_final)
-
-        # Measurement Bloch vector in lab frame
+    @staticmethod
+    def _measurement_type_to_mz(measurement_type: str) -> float:
+        """Map measurement type string to m_z value."""
         if measurement_type == 'z':
-            B_lab = np.array([0, 0, 1])
-        elif measurement_type == 'x':
-            B_lab = np.array([1, 0, 0])
-        elif measurement_type == 'y':
-            B_lab = np.array([0, 1, 0])
-        elif measurement_type in ['population_g', 'population_m']:
-            B_lab = np.array([0, 0, 1])  # Population is like σ_z
+            return 1.0
+        elif measurement_type in ('x', 'y'):
+            return 0.0
+        elif measurement_type in ('population_g', 'population_m'):
+            return 1.0
         else:
             raise ValueError(f"Unknown measurement type: {measurement_type}")
-
-        # Transform to interaction frame: B = R^T · B_lab
-        B = R.T @ B_lab
-
-        return B
-
-    def _compute_final_f(self, f0, g0, omega, tau):
-        """Compute final f value after continuous pulse."""
-        # For continuous Rabi with effective Rabi frequency
-        rabi = np.sqrt(omega**2 + self._delta**2)
-        if rabi < 1e-12:
-            return f0
-        theta = rabi * tau
-        cos_half = np.cos(theta / 2)
-        sin_half = np.sin(theta / 2)
-        # f evolution for x-axis drive
-        return cos_half * f0 - 1j * (self._delta / rabi) * sin_half * f0
-
-    def _compute_final_g(self, f0, g0, omega, tau):
-        """Compute final g value after continuous pulse."""
-        rabi = np.sqrt(omega**2 + self._delta**2)
-        if rabi < 1e-12:
-            return g0
-        theta = rabi * tau
-        sin_half = np.sin(theta / 2)
-        # g evolution for x-axis drive
-        return (omega / rabi) * sin_half
-
-    def _su2_to_so3(self, f, g):
-        """
-        Convert SU(2) parameters (f, g) to SO(3) rotation matrix.
-
-        For U = [[f, ig], [ig*, f*]], computes R such that
-        U† σ_j U = Σ_k R_jk σ_k
-        """
-        a, b = np.real(f), np.imag(f)
-        c, d = np.real(g), np.imag(g)
-
-        R = np.array([
-            [a**2 + c**2 - b**2 - d**2, 2*(c*d - a*b), 2*(a*d + b*c)],
-            [2*(a*b + c*d), a**2 + d**2 - b**2 - c**2, 2*(b*d - a*c)],
-            [2*(b*c - a*d), 2*(a*c + b*d), a**2 + b**2 - c**2 - d**2]
-        ])
-        return R
 
     def characteristic_frequencies(self) -> np.ndarray:
         """

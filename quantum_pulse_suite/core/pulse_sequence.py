@@ -388,6 +388,8 @@ class InstantaneousPulseSequence(PulseSequence):
                 f_prev = f_new
                 g_prev = g_new
 
+        self._f_final = f_prev
+        self._g_final = g_prev
         self._polynomials_computed = True
         return self._polynomial_segments
 
@@ -397,7 +399,10 @@ class InstantaneousPulseSequence(PulseSequence):
             self.compute_polynomials()
 
         from .filter_functions import InstantaneousFilterFunction
-        return InstantaneousFilterFunction(self._poly_list)
+        return InstantaneousFilterFunction(
+            self._poly_list,
+            f_final=self._f_final, g_final=self._g_final
+        )
 
 
 class ContinuousPulseSequence(PulseSequence):
@@ -522,6 +527,8 @@ class ContinuousPulseSequence(PulseSequence):
             g_prev_val = G_func(end_time)
             curr_time = end_time
 
+        self._f_final = f_prev_val
+        self._g_final = g_prev_val
         self._polynomials_computed = True
         return self._polynomial_segments
 
@@ -531,7 +538,10 @@ class ContinuousPulseSequence(PulseSequence):
             self.compute_polynomials()
 
         from .filter_functions import ContinuousFilterFunction
-        return ContinuousFilterFunction(self._poly_list)
+        return ContinuousFilterFunction(
+            self._poly_list,
+            f_final=self._f_final, g_final=self._g_final
+        )
 
 
 # Factory functions for common sequences

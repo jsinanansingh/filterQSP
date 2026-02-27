@@ -117,7 +117,19 @@ def sj(w: Union[float, np.ndarray], t: float, omega: float, tau: float,
 
 
 class FilterFunction(ABC):
-    """Abstract base class for filter function calculators."""
+    """Abstract base class for filter function calculators.
+
+    Parameters
+    ----------
+    f_final : complex, optional
+        Final Cayley-Klein parameter f after the full sequence (default: 1).
+    g_final : complex, optional
+        Final Cayley-Klein parameter g after the full sequence (default: 0).
+    """
+
+    def __init__(self, f_final: complex = 1.0, g_final: complex = 0.0):
+        self._f_final = f_final
+        self._g_final = g_final
 
     @abstractmethod
     def filter_function(self, frequencies: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -153,6 +165,51 @@ class FilterFunction(ABC):
         Fx, Fy, Fz = self.filter_function(frequencies)
         return np.abs(Fx)**2 + np.abs(Fy)**2 + np.abs(Fz)**2
 
+    @staticmethod
+    def _su2_to_so3(f: complex, g: complex) -> np.ndarray:
+        """
+        Convert SU(2) Cayley-Klein parameters (f, g) to SO(3) rotation matrix.
+
+        For U = [[f, ig], [ig*, f*]], computes R such that
+        U^dag sigma_j U = sum_k R_jk sigma_k.
+        """
+        a, b = np.real(f), np.imag(f)
+        c, d = np.real(g), np.imag(g)
+        return np.array([
+            [a**2 + c**2 - b**2 - d**2, 2*(c*d - a*b), 2*(a*d + b*c)],
+            [2*(a*b + c*d), a**2 + d**2 - b**2 - c**2, 2*(b*d - a*c)],
+            [2*(b*c - a*d), 2*(a*c + b*d), a**2 + b**2 - c**2 - d**2]
+        ])
+
+    def kubo_sensitivity(self, frequencies: np.ndarray,
+                         B_lab: np.ndarray) -> np.ndarray:
+        """
+        Compute measurement-dependent noise sensitivity via the Kubo formula.
+
+        sensitivity(w) = |F(w)|^2 - |B . F(w)|^2
+
+        where B is the measurement Bloch vector rotated into the toggling frame.
+
+        Parameters
+        ----------
+        frequencies : np.ndarray
+            Angular frequencies.
+        B_lab : np.ndarray
+            Unit Bloch vector (3,) of the measurement direction in the lab frame.
+
+        Returns
+        -------
+        np.ndarray
+            Kubo sensitivity at each frequency, non-negative.
+        """
+        Fx, Fy, Fz = self.filter_function(frequencies)
+        R = self._su2_to_so3(self._f_final, self._g_final)
+        B = R.T @ np.asarray(B_lab, dtype=float)
+
+        F_mag_sq = np.abs(Fx)**2 + np.abs(Fy)**2 + np.abs(Fz)**2
+        B_dot_F = B[0]*Fx + B[1]*Fy + B[2]*Fz
+        return np.maximum(F_mag_sq - np.abs(B_dot_F)**2, 0.0)
+
 
 class InstantaneousFilterFunction(FilterFunction):
     """
@@ -168,7 +225,9 @@ class InstantaneousFilterFunction(FilterFunction):
         InstantaneousPulseSequence.compute_polynomials()
     """
 
-    def __init__(self, poly_list: List[Tuple]):
+    def __init__(self, poly_list: List[Tuple],
+                 f_final: complex = 1.0, g_final: complex = 0.0):
+        super().__init__(f_final=f_final, g_final=g_final)
         self._poly_list = poly_list
 
     def _compute_factor(self, w: np.ndarray, t0: float, tau: float) -> np.ndarray:
@@ -235,7 +294,9 @@ class ContinuousFilterFunction(FilterFunction):
         ContinuousPulseSequence.compute_polynomials()
     """
 
-    def __init__(self, poly_list: List[Tuple]):
+    def __init__(self, poly_list: List[Tuple],
+                 f_final: complex = 1.0, g_final: complex = 0.0):
+        super().__init__(f_final=f_final, g_final=g_final)
         self._poly_list = poly_list
 
     def _compute_z_and_fz(self, frequencies: np.ndarray):

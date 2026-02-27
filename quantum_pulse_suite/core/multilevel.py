@@ -336,18 +336,13 @@ class MultiLevelPulseSequence:
         f_prev = 1.0 + 0j
         g_prev = 0.0 + 0j
 
-        first_rotation = True
-
         for element in self._elements:
             if isinstance(element, MultiLevelFreeEvolution):
                 delta = element.delta
                 tau = element.tau
                 theta = 0.0
 
-                if first_rotation:
-                    self._poly_list.append((0, 0, theta, tau, curr_time + tau))
-                else:
-                    self._poly_list.append((f_prev, g_prev, theta, tau, curr_time + tau))
+                self._poly_list.append((f_prev, g_prev, theta, tau, curr_time + tau))
 
                 # Create polynomial functions
                 def make_F(delta_val, t0_val, f_val):
@@ -392,7 +387,6 @@ class MultiLevelPulseSequence:
 
                 f_prev = f_new
                 g_prev = g_new
-                first_rotation = False
 
             elif isinstance(element, MultiLevelContinuousPulse):
                 omega = element.omega
@@ -406,55 +400,46 @@ class MultiLevelPulseSequence:
 
                 # Compute end values using the continuous formula
                 def make_F_continuous(rabi_val, delta_val, omega_val, axis_val,
-                                       t0_val, f_val, g_val, first=False):
+                                       t0_val, f_val, g_val):
                     n_x, n_y, n_z = axis_val
                     def F(t):
                         dt = t - t0_val
-                        if first:
-                            return (np.cos(rabi_val * dt / 2) -
-                                    1j * (delta_val + n_z * omega_val) / rabi_val *
-                                    np.sin(rabi_val * dt / 2))
-                        else:
-                            term1 = ((np.cos(rabi_val * dt / 2) +
-                                     1j * (delta_val + n_z * omega_val) / rabi_val *
-                                     np.sin(rabi_val * dt / 2)) * f_val)
-                            term2 = ((-n_x + 1j * n_y) * omega_val / rabi_val *
-                                     np.sin(rabi_val * dt / 2) * np.conj(g_val))
-                            return term1 + term2
+                        term1 = ((np.cos(rabi_val * dt / 2) +
+                                 1j * (delta_val + n_z * omega_val) / rabi_val *
+                                 np.sin(rabi_val * dt / 2)) * f_val)
+                        term2 = ((-n_x + 1j * n_y) * omega_val / rabi_val *
+                                 np.sin(rabi_val * dt / 2) * np.conj(g_val))
+                        return term1 + term2
                     return F
 
                 def make_G_continuous(rabi_val, delta_val, omega_val, axis_val,
-                                       t0_val, f_val, g_val, first=False):
+                                       t0_val, f_val, g_val):
                     n_x, n_y, n_z = axis_val
                     def G(t):
                         dt = t - t0_val
-                        if first:
-                            return ((n_x - 1j * n_y) * omega_val / rabi_val *
-                                    np.sin(rabi_val * dt / 2))
-                        else:
-                            term1 = ((n_x - 1j * n_y) * omega_val / rabi_val *
-                                     np.sin(rabi_val * dt / 2) * np.conj(f_val))
-                            term2 = ((np.cos(rabi_val * dt / 2) +
-                                     1j * (delta_val + n_z * omega_val) / rabi_val *
-                                     np.sin(rabi_val * dt / 2)) * g_val)
-                            return term1 + term2
+                        term1 = ((n_x - 1j * n_y) * omega_val / rabi_val *
+                                 np.sin(rabi_val * dt / 2) * np.conj(f_val))
+                        term2 = ((np.cos(rabi_val * dt / 2) +
+                                 1j * (delta_val + n_z * omega_val) / rabi_val *
+                                 np.sin(rabi_val * dt / 2)) * g_val)
+                        return term1 + term2
                     return G
 
                 start_time = curr_time
                 end_time = curr_time + tau
-                is_first = first_rotation
                 F_func = make_F_continuous(rabi, delta, omega, axis, curr_time,
-                                            f_prev, g_prev, first=is_first)
+                                            f_prev, g_prev)
                 G_func = make_G_continuous(rabi, delta, omega, axis, curr_time,
-                                            f_prev, g_prev, first=is_first)
+                                            f_prev, g_prev)
 
                 self._polynomial_segments.append((F_func, G_func, start_time, end_time))
 
                 f_prev = F_func(end_time)
                 g_prev = G_func(end_time)
                 curr_time = end_time
-                first_rotation = False
 
+        self._f_final = f_prev
+        self._g_final = g_prev
         self._polynomials_computed = True
         return self._polynomial_segments
 
@@ -470,7 +455,10 @@ class MultiLevelPulseSequence:
         return SubspaceFilterFunction(
             self._poly_list,
             self._subspace,
-            continuous=has_continuous
+            continuous=has_continuous,
+            polynomial_segments=self._polynomial_segments,
+            f_final=self._f_final,
+            g_final=self._g_final,
         )
 
     def evolve_state(self, initial_state: np.ndarray) -> np.ndarray:
@@ -525,10 +513,14 @@ class SubspaceFilterFunction(FilterFunction):
     """
 
     def __init__(self, poly_list: List[Tuple], subspace: Subspace,
-                 continuous: bool = False):
+                 continuous: bool = False,
+                 polynomial_segments: Optional[List[Tuple]] = None,
+                 f_final: complex = 1.0, g_final: complex = 0.0):
+        super().__init__(f_final=f_final, g_final=g_final)
         self._poly_list = poly_list
         self._subspace = subspace
         self._continuous = continuous
+        self._polynomial_segments = polynomial_segments
 
     @property
     def subspace(self) -> Subspace:
@@ -584,27 +576,24 @@ class SubspaceFilterFunction(FilterFunction):
                 curr_time += tau
         else:
             # Instantaneous pulse formulas
-            for index, (f, g, theta, tau, t_end) in enumerate(self._poly_list):
+            for f, g, theta, tau, t_end in self._poly_list:
                 factor = self._compute_factor_instant(frequencies, curr_time, tau)
 
-                if index == 0:
-                    Fz_total += factor
-                else:
-                    cos_theta = np.cos(theta)
-                    sin_theta = np.sin(theta)
+                cos_theta = np.cos(theta)
+                sin_theta = np.sin(theta)
 
-                    expr = 2 * cos_theta * f * g + sin_theta * (f**2 - np.conj(g)**2)
+                expr = 2 * cos_theta * f * np.conj(g) + sin_theta * (f**2 - np.conj(g)**2)
 
-                    Fx_total += factor * np.real(1j * expr)
-                    Fy_total += factor * np.imag(1j * expr)
+                Fx_total += factor * np.real(-1j * expr)
+                Fy_total += factor * np.imag(1j * expr)
 
-                    fz_expr = (cos_theta * (f * np.conj(f) - g * np.conj(g)) -
-                               sin_theta * (f * g + np.conj(f) * np.conj(g)))
-                    Fz_total += factor * fz_expr
+                fz_expr = (cos_theta * (f * np.conj(f) - g * np.conj(g)) -
+                           sin_theta * (f * g + np.conj(f) * np.conj(g)))
+                Fz_total += factor * fz_expr
 
-                curr_time = t_end - tau + tau
+                curr_time = t_end
 
-        return np.real(Fx_total), np.real(Fy_total), np.real(Fz_total)
+        return Fx_total, Fy_total, Fz_total
 
     def filter_function_for_noise(self, frequencies: np.ndarray,
                                    noise_operator: np.ndarray) -> np.ndarray:
@@ -642,6 +631,83 @@ class SubspaceFilterFunction(FilterFunction):
 
         # Total filter function for this noise
         return (a_x * Fx + a_y * Fy + a_z * Fz)**2
+
+    def _compute_phi(self, frequencies: np.ndarray) -> np.ndarray:
+        """
+        Compute Phi(w) = sum_j int F*_j(t) G_j(t) e^{-iwt} dt.
+
+        This is the core spectral quantity for three-level clock filter
+        functions. For instantaneous segments the integrand is constant
+        (detuning phases cancel in F*G), giving an analytic result.
+        For continuous segments, numerical quadrature is used.
+
+        Parameters
+        ----------
+        frequencies : np.ndarray
+            Angular frequencies.
+
+        Returns
+        -------
+        np.ndarray
+            Complex array Phi(w).
+        """
+        from .three_level_filter import _exp_integral, _add_continuous_segment_phi
+
+        frequencies = np.asarray(frequencies, dtype=float)
+        Phi = np.zeros(len(frequencies), dtype=complex)
+
+        if self._polynomial_segments is None:
+            return Phi
+
+        for seg_idx, (F_func, G_func, t_start, t_end) in enumerate(
+                self._polynomial_segments):
+            tau = t_end - t_start
+            if tau < 1e-15:
+                continue
+
+            poly_entry = self._poly_list[seg_idx]
+
+            if len(poly_entry) == 5:
+                # Free-evolution segment: F*G = conj(f_prev) * g_prev (constant)
+                f_prev, g_prev = poly_entry[0], poly_entry[1]
+                fg_product = np.conj(f_prev) * g_prev
+                if abs(fg_product) < 1e-15:
+                    continue
+                Phi += fg_product * _exp_integral(frequencies, t_start, t_end)
+
+            elif len(poly_entry) == 7:
+                # Continuous pulse segment: numerical quadrature
+                _add_continuous_segment_phi(
+                    Phi, F_func, G_func, t_start, t_end, frequencies)
+
+        return Phi
+
+    def measurement_sensitivity(self, frequencies: np.ndarray,
+                                m_z: float) -> np.ndarray:
+        """
+        Compute the e-noise filter function Fe(w) for a clock measurement.
+
+        Uses the three-level decomposition:
+            Fe(w) = 1/2 * ((1 - m_z^2) + 2*m_z) * |Phi(w)|^2
+
+        where m_z is the z-component of the measurement direction on the
+        clock ({|g>, |f>}) Bloch sphere. For sigma_y measurement m_z=0,
+        for sigma_z measurement m_z=1.
+
+        Parameters
+        ----------
+        frequencies : np.ndarray
+            Angular frequencies.
+        m_z : float
+            z-component of measurement direction.
+
+        Returns
+        -------
+        np.ndarray
+            Fe(w) at each frequency.
+        """
+        Phi = self._compute_phi(frequencies)
+        return 0.5 * ((1 - m_z**2) + 2 * m_z) * np.abs(Phi)**2
 
 
 # =============================================================================
