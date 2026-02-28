@@ -1,3 +1,4 @@
+
 """
 Compare sigma_y frequency sensitivity: Ramsey, Rabi, and GPS protocols.
 
@@ -8,10 +9,10 @@ Three computation paths are shown for each protocol, distinguished by linestyle:
               3-level unitary U(t), projects to the probe subspace, samples
               phi(t)=F*(t)G(t) and FFTs.  Independently validates the analytic.
   Dotted  — FFT (2-level):       fft_filter_function on a qubit – propagates
-              the 2x2 probe unitary in the toggling frame and FFTs.  The
-              sigma_y measurement sensitivity |F_y(w)|^2 is extracted via
-              bloch_components_from_matrix, giving the apples-to-apples
-              comparison with the 3-level Fe for a sigma_y readout.
+              the 2x2 probe unitary in the toggling frame and FFTs, giving the
+              standard qubit noise susceptibility.  The 3-level Fe is smaller
+              because the differential clock measurement cancels common-mode
+              noise on |g>; this comparison makes that suppression explicit.
 
 Protocol colours match across all three method types.
 
@@ -49,7 +50,7 @@ from quantum_pulse_suite import (
     continuous_ramsey_sequence,
     continuous_rabi_sequence,
     fft_filter_function,
-    bloch_components_from_matrix,
+    noise_susceptibility_from_matrix,
 )
 
 # =============================================================================
@@ -59,7 +60,7 @@ from quantum_pulse_suite import (
 T_TOTAL    = 2 * np.pi
 OMEGA_FAST = 20 * np.pi
 
-FREQ_MIN = 0.01
+FREQ_MIN = 0.1
 FREQ_MAX = 50
 N_FREQ   = 2000
 N_FFT    = 2048       # time samples for both FFT paths
@@ -129,12 +130,13 @@ def _fft_fe_3level(seq, m_z=M_Z_SIGMA_Y):
     return freqs[mask], Fe[mask]
 
 
-def _fft_fy2_2level(qubit_seq):
-    """sigma_y measurement sensitivity |F_y(w)|^2 via toggling-frame FFT (2-level)."""
+
+def _fft_ns_2level(qubit_seq):
+    """Noise susceptibility via toggling-frame FFT (2-level/qubit path)."""
     freqs, F_mat = fft_filter_function(qubit_seq, SIGMA_Z / 2, n_samples=N_FFT)
-    _, Fy, _ = bloch_components_from_matrix(F_mat)
+    ns = noise_susceptibility_from_matrix(F_mat)
     mask = (freqs >= FREQ_MIN) & (freqs <= FREQ_MAX)
-    return freqs[mask], np.abs(Fy[mask])**2
+    return freqs[mask], ns[mask]
 
 
 # =============================================================================
@@ -179,7 +181,7 @@ def main():
     _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
 
     f3L, Fe3L = _fft_fe_3level(seq)
-    f2L, ns2L = _fft_fy2_2level(ramsey_sequence(tau=T_TOTAL, delta=d_ri))
+    f2L, ns2L = _fft_ns_2level(ramsey_sequence(tau=T_TOTAL, delta=d_ri))
 
     _add_triple(ax, 'C0', rf'Ramsey $F_e$ (instant, $\delta={d_ri:.2f}$)',
                 frequencies, Fe_ana, f3L, Fe3L, f2L, ns2L)
@@ -196,7 +198,7 @@ def main():
     _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
 
     f3L, Fe3L = _fft_fe_3level(seq)
-    f2L, ns2L = _fft_fy2_2level(
+    f2L, ns2L = _fft_ns_2level(
         continuous_ramsey_sequence(omega=OMEGA_FAST, tau=T_TOTAL, delta=d_rc))
 
     _add_triple(ax, 'C5', rf'Ramsey $F_e$ (continuous, $\delta={d_rc:.2f}$)',
@@ -204,15 +206,15 @@ def main():
 
     # ── Rabi m=1 ──────────────────────────────────────────────────────────
     print("Optimising delta for Rabi m=1...")
-    omega_rabi = 2 * np.pi / T_TOTAL
+    omega_rabi =  np.pi / T_TOTAL
 
     def _build_rabi(delta):
         s = MultiLevelPulseSequence(system, system.probe)
         s.add_continuous_pulse(omega_rabi, [1, 0, 0], delta, T_TOTAL)
         return s
 
-    d_rabi = find_optimal_delta(_build_rabi, frequencies,
-                                delta_range=(0.01, 2.0), n_grid=50)
+    d_rabi = 0 #find_optimal_delta(_build_rabi, frequencies,
+               #                 delta_range=(0.01, 2.0), n_grid=50)
     print(f"  delta_opt = {d_rabi:.4f}")
 
     seq = _build_rabi(d_rabi)
@@ -220,7 +222,7 @@ def main():
     _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
 
     f3L, Fe3L = _fft_fe_3level(seq)
-    f2L, ns2L = _fft_fy2_2level(
+    f2L, ns2L = _fft_ns_2level(
         continuous_rabi_sequence(omega=omega_rabi, tau=T_TOTAL, delta=d_rabi))
 
     _add_triple(ax, 'C1', rf'Rabi $F_e$ (m=1, $\delta={d_rabi:.2f}$)',
@@ -242,7 +244,7 @@ def main():
 
         f3L, Fe3L = _fft_fe_3level(gps._sequence)
         # 2-level: GPS → continuous Rabi on probe qubit (no |f> reference)
-        f2L, ns2L = _fft_fy2_2level(
+        f2L, ns2L = _fft_ns_2level(
             continuous_rabi_sequence(omega=omega_gps, tau=T_TOTAL, delta=0.0))
 
         _add_triple(ax, color, rf'GPS $F_e$ (m={n_cyc}, $\delta=0$)',
@@ -268,7 +270,7 @@ def main():
         Line2D([0], [0], color='k', lw=1.4, ls='--', alpha=0.85,
                label='FFT (3-level)'),
         Line2D([0], [0], color='k', lw=1.4, ls=':', alpha=0.85,
-               label=r'FFT (2-level, $|F_y|^2$)'),
+               label='FFT (2-level qubit)'),
     ]
     ax.legend(handles=method_handles, fontsize=9, loc='upper right')
     ax.add_artist(protocol_legend)

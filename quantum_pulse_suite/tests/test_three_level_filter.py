@@ -123,19 +123,24 @@ class TestFFTThreeLevelFilter(unittest.TestCase):
         _, _, _, Phi = fft_three_level_filter(seq)
         self.assertTrue(np.all(np.isfinite(Phi)))
 
-    def test_fft_Fe_varies_with_m_z(self):
-        """Fe should change with m_z (different prefactor)."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        _, Fe0, _, _ = fft_three_level_filter(seq, m_z=0.0)
-        _, Fe1, _, _ = fft_three_level_filter(seq, m_z=1.0)
+    def test_fft_Fe_varies_with_measurement(self):
+        """Fe should change with measurement direction per the new Fe formula.
 
-        # For m_z=0: prefactor = 1/2*(1+0) = 0.5
-        # For m_z=1: prefactor = 1/2*(0+2) = 1.0
-        # So Fe1 = 2 * Fe0
-        mask = Fe0 > 1e-10 * np.max(Fe0)
-        if np.any(mask):
-            ratio = Fe1[mask] / Fe0[mask]
-            np.testing.assert_allclose(ratio, 2.0, rtol=1e-10)
+        New formula: Fe = 1/2*(1+2*m_z*m_x)*|Phi|^2 + (m_x^2+m_y^2)*|Chi|^2
+
+        With m_x=m_y=0, Fe = 1/2*|Phi|^2 regardless of m_z.
+        With m_x=1 (and m_z=0), Fe = 1/2*|Phi|^2 + |Chi|^2 >= Fe(m_x=0).
+        """
+        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
+
+        # m_z alone (m_x=0) should NOT change Fe
+        _, Fe_mz0, _, _ = fft_three_level_filter(seq, m_z=0.0)
+        _, Fe_mz1, _, _ = fft_three_level_filter(seq, m_z=1.0)
+        np.testing.assert_array_equal(Fe_mz0, Fe_mz1)
+
+        # m_x=1 adds the Chi term, so Fe >= Fe(m_x=0)
+        _, Fe_mx1, _, _ = fft_three_level_filter(seq, m_x=1.0)
+        self.assertTrue(np.all(Fe_mx1 >= Fe_mz0 - 1e-15))
 
 
 class TestFFTvsAnalytic(unittest.TestCase):
@@ -273,23 +278,35 @@ class TestMzDependence(unittest.TestCase):
         self.system = ThreeLevelClock()
 
     def test_Fe_prefactor_values(self):
-        """Fe prefactor = (1 - m_z^2 + 2*m_z)/2 for different m_z values."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
+        """Fe formula: Fe = 1/2*(1+2*m_z*m_x)*|Phi|^2 + (m_x^2+m_y^2)*|Chi|^2.
 
-        # Get Phi (same for all m_z)
-        freqs, _, _, Phi_ref = fft_three_level_filter(seq, m_z=0.0)
+        Key consequences:
+        - m_z alone (m_x=0) does NOT change Fe: Fe = 1/2*|Phi|^2.
+        - Cross-term: Fe(m_x=1,m_z=1) - Fe(m_x=1,m_z=0) = |Phi|^2.
+        - m_y adds a Chi term (non-negative): Fe(m_y=1) >= Fe(m_x=m_y=m_z=0).
+        """
+        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
+        freqs, _, _, Phi_ref = fft_three_level_filter(seq)
         Phi2 = np.abs(Phi_ref)**2
 
+        # m_z alone does not change Fe
         for m_z in [0.0, 0.5, 1.0, -0.5]:
             _, Fe, _, _ = fft_three_level_filter(seq, m_z=m_z)
-            expected_prefactor = 0.5 * ((1 - m_z**2) + 2 * m_z)
-            Fe_expected = expected_prefactor * Phi2
+            np.testing.assert_allclose(
+                Fe, 0.5 * Phi2, rtol=1e-6,
+                err_msg=f"Fe should equal 0.5*|Phi|^2 for m_z={m_z} with m_x=m_y=0")
 
-            mask = Fe_expected > 1e-10 * np.max(Fe_expected)
-            if np.any(mask):
-                np.testing.assert_allclose(
-                    Fe[mask], Fe_expected[mask], rtol=1e-6,
-                    err_msg=f"Fe prefactor wrong for m_z={m_z}")
+        # Cross-term: Fe(m_x=1,m_z=1) - Fe(m_x=1,m_z=0) = |Phi|^2
+        _, Fe_mz0, _, _ = fft_three_level_filter(seq, m_x=1.0, m_z=0.0)
+        _, Fe_mz1, _, _ = fft_three_level_filter(seq, m_x=1.0, m_z=1.0)
+        np.testing.assert_allclose(
+            Fe_mz1 - Fe_mz0, Phi2, rtol=1e-6,
+            err_msg="Cross-term: Fe(m_x=1,m_z=1) - Fe(m_x=1,m_z=0) should equal |Phi|^2")
+
+        # Chi term is non-negative: Fe(m_y=1) >= Fe(m_x=m_y=m_z=0)
+        _, Fe_default, _, _ = fft_three_level_filter(seq)
+        _, Fe_my1, _, _ = fft_three_level_filter(seq, m_y=1.0)
+        self.assertTrue(np.all(Fe_my1 >= Fe_default - 1e-15))
 
     def test_Ff_varies_with_m_z(self):
         """Ff should scale as (m_z^2 - 1)."""
