@@ -359,6 +359,334 @@ def fft_phase_filter_2level(seq, n_samples=4096, pad_factor=4):
     return freqs_pos, F_phase
 
 
+def kubo_filter_2level(qubit_seq, m_hat=(0., 1., 0.), r0=None,
+                       n_samples=4096, pad_factor=4):
+    """
+    Kubo variance filter function for a qubit (2-level) pulse sequence.
+
+    Computes the first-order sensitivity trajectory
+
+        r(t) = (m̂ × R(t)) · r₀
+
+    where R(t) is the Bloch vector of the toggling-frame noise operator
+    U†(t)(σ_z/2)U(t), evaluated analytically from the QSP polynomial
+    segments.  Returns the variance filter function |r(ω)|².
+
+    Parameters
+    ----------
+    qubit_seq : PulseSequence
+        Qubit pulse sequence.  compute_polynomials() is called if needed.
+    m_hat : array_like, shape (3,)
+        Bloch vector of measurement observable M.
+        Default (0, 1, 0) = σ_y.
+    r0 : array_like, shape (3,), optional
+        Bloch vector of initial state ψ₀.
+        Default (1, 0, 0) for equal superposition (|0⟩+|1⟩)/√2.
+    n_samples : int
+        Number of time samples (power of 2 recommended).
+    pad_factor : int
+        Zero-padding factor for spectral interpolation.
+
+    Returns
+    -------
+    frequencies : np.ndarray
+        Positive angular frequencies.
+    F_kubo : np.ndarray
+        Kubo variance filter function |r(ω)|² at each frequency.
+    """
+    if not qubit_seq._polynomials_computed:
+        qubit_seq.compute_polynomials()
+
+    m_hat = np.asarray(m_hat, dtype=float)
+    if r0 is None:
+        r0 = np.array([1., 0., 0.])   # (|0⟩+|1⟩)/√2 → Bloch x-axis
+    else:
+        r0 = np.asarray(r0, dtype=float)
+
+    T = qubit_seq.total_duration()
+    dt = T / n_samples
+    times = np.linspace(0, T, n_samples, endpoint=False)
+    r_samples = np.zeros(n_samples, dtype=complex)
+
+    for F_func, G_func, t_start, t_end in qubit_seq._polynomial_segments:
+        mask = (times >= t_start) & (times < t_end)
+        for idx in np.where(mask)[0]:
+            t = times[idx]
+            f_t = F_func(t)
+            g_t = G_func(t)
+
+            # Bloch vector of U†(σ_z/2)U:
+            #   H̃_{01} = i g f*  →  n_x = 2 Re(igf*), n_y = -2 Im(igf*)
+            #   n_z = |f|² - |g|²
+            igf_star = 1j * g_t * np.conj(f_t)
+            R = np.array([2.0 * np.real(igf_star),
+                          -2.0 * np.imag(igf_star),
+                          np.abs(f_t)**2 - np.abs(g_t)**2])
+
+            r_samples[idx] = np.dot(np.cross(m_hat, R), r0)
+
+    # Zero-pad and FFT
+    n_padded = pad_factor * n_samples
+    r_padded = np.zeros(n_padded, dtype=complex)
+    r_padded[:n_samples] = r_samples
+
+    r_fft = np.fft.fft(r_padded) * dt
+    freqs = 2 * np.pi * np.fft.fftfreq(n_padded, d=dt)
+
+    pos_mask = freqs > 0
+    return freqs[pos_mask], np.abs(r_fft[pos_mask])**2
+
+
+def kubo_filter_3level(seq, M=None, psi0=None, n_samples=4096, pad_factor=4):
+    """
+    Kubo variance filter function for the three-level clock system.
+
+    Computes the first-order sensitivity trajectory
+
+        r(t) = ⟨ψ₀ | [M, H̃(t)] | ψ₀⟩
+
+    where H̃(t) = U†(t)|e⟩⟨e|U(t) is the toggling-frame probe noise
+    Hamiltonian constructed analytically from the QSP polynomial segments.
+    Returns the variance filter function |r(ω)|².
+
+    For the default choice M = σ_y^{gm} and ψ₀ = (|g⟩+|m⟩)/√2, this
+    reduces to r(t) = i|g(t)|², so |r(ω)|² = |Chi(ω)|² — identical to
+    the Chi term in Fe with m_y=1.
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+        Pulse sequence on the probe {|g⟩, |e⟩} subspace.
+        compute_polynomials() is called if needed.
+    M : np.ndarray, shape (d, d), optional
+        Measurement observable.  Default: σ_y on the |g⟩-|m⟩ clock
+        transition, i.e. -i|g⟩⟨m| + i|m⟩⟨g|.
+    psi0 : np.ndarray, shape (d,), optional
+        Initial state vector.  Default: (|g⟩+|m⟩)/√2.
+    n_samples : int
+        Number of time samples (power of 2 recommended).
+    pad_factor : int
+        Zero-padding factor for spectral interpolation.
+
+    Returns
+    -------
+    frequencies : np.ndarray
+        Positive angular frequencies.
+    F_kubo : np.ndarray
+        Kubo variance filter function |r(ω)|² at each frequency.
+    """
+    if not seq._polynomials_computed:
+        seq.compute_polynomials()
+
+    d = seq.dim
+    i_g, i_e = seq.subspace._levels          # probe subspace indices
+    i_m = next(i for i in range(d) if i not in (i_g, i_e))   # clock state
+
+    if M is None:
+        M = np.zeros((d, d), dtype=complex)
+        M[i_g, i_m] = -1j   # σ_y^{gm} = -i|g⟩⟨m| + i|m⟩⟨g|
+        M[i_m, i_g] =  1j
+
+    if psi0 is None:
+        psi0 = np.zeros(d, dtype=complex)
+        psi0[i_g] = 1.0 / np.sqrt(2)
+        psi0[i_m] = 1.0 / np.sqrt(2)
+
+    M    = np.asarray(M,    dtype=complex)
+    psi0 = np.asarray(psi0, dtype=complex)
+
+    # Noise: |e⟩⟨e| in probe subspace → [[0,0],[0,1]]
+    H_noise_sub = np.array([[0, 0], [0, 1]], dtype=complex)
+
+    T = seq.total_duration()
+    dt = T / n_samples
+    times = np.linspace(0, T, n_samples, endpoint=False)
+    r_samples = np.zeros(n_samples, dtype=complex)
+
+    for F_func, G_func, t_start, t_end in seq._polynomial_segments:
+        mask = (times >= t_start) & (times < t_end)
+        for idx in np.where(mask)[0]:
+            t = times[idx]
+            f_t = F_func(t)
+            g_t = G_func(t)
+
+            # Probe-subspace unitary U_sub(t) = [[f, ig],[ig*, f*]]
+            U_sub = np.array([[f_t,            1j * g_t],
+                              [1j * np.conj(g_t), np.conj(f_t)]])
+
+            # H̃ in probe subspace: U_sub† H_noise_sub U_sub
+            H_tilde_sub = U_sub.conj().T @ H_noise_sub @ U_sub
+
+            # Embed H̃ into full d×d space at probe indices
+            H_tilde = np.zeros((d, d), dtype=complex)
+            for li, i in enumerate((i_g, i_e)):
+                for lj, j in enumerate((i_g, i_e)):
+                    H_tilde[i, j] = H_tilde_sub[li, lj]
+
+            # r(t) = ⟨ψ₀|[M, H̃]|ψ₀⟩  (M and H̃ are Hermitian → r is imaginary)
+            MH = M @ H_tilde
+            commutator = MH - MH.conj().T        # = [M, H̃]
+            r_samples[idx] = psi0.conj() @ commutator @ psi0
+
+    # Zero-pad and FFT
+    n_padded = pad_factor * n_samples
+    r_padded = np.zeros(n_padded, dtype=complex)
+    r_padded[:n_samples] = r_samples
+
+    r_fft = np.fft.fft(r_padded) * dt
+    freqs = 2 * np.pi * np.fft.fftfreq(n_padded, d=dt)
+
+    pos_mask = freqs > 0
+    return freqs[pos_mask], np.abs(r_fft[pos_mask])**2
+
+
+def kubo_filter_2level_analytic(qubit_seq, frequencies,
+                                m_hat=(0., 1., 0.), r0=None):
+    """
+    Analytic (QSP-polynomial) Kubo variance filter function for a qubit.
+
+    Evaluates r(ω) = ∫₀ᵀ r(t) e^{-iωt} dt analytically by decomposing
+
+        r(t) = C_f2·|F(t)|² + C_g2·|G(t)|² + C_q·G(t)F*(t) + C_q*·G*(t)F(t)
+
+    where the coefficients are determined by m̂ and r₀.  For free-evolution
+    segments |F|², |G|², GF* are constant → exact via _exp_integral.
+    For continuous-pulse segments: per-frequency numerical quadrature.
+
+    Parameters
+    ----------
+    qubit_seq : PulseSequence
+        Qubit pulse sequence with _polynomial_segments available.
+    frequencies : array_like
+        Angular frequencies at which to evaluate.
+    m_hat : array_like, shape (3,)
+        Bloch vector of measurement M.  Default (0, 1, 0) = σ_y.
+    r0 : array_like, shape (3,), optional
+        Bloch vector of initial state.  Default (1, 0, 0) for equal superposition.
+
+    Returns
+    -------
+    frequencies : np.ndarray
+        Input frequencies.
+    F_kubo : np.ndarray
+        |r(ω)|² at each frequency.
+    """
+    if not qubit_seq._polynomials_computed:
+        qubit_seq.compute_polynomials()
+
+    m_hat = np.asarray(m_hat, dtype=float)
+    if r0 is None:
+        r0 = np.array([1., 0., 0.])
+    else:
+        r0 = np.asarray(r0, dtype=float)
+
+    frequencies = np.asarray(frequencies, dtype=float)
+
+    # Precompute coefficients:
+    # R(t) = (-2 Im(GF*), -2 Re(GF*), |F|²-|G|²)
+    #      = i*(GF* - G*F) * (1,0,0) direction +
+    #        -(GF* + G*F) * (0,1,0) direction +
+    #        (|F|²-|G|²)  * (0,0,1) direction
+    # Coefficients of GF*, G*F, |F|², |G|² in r = (m̂ × R)·r₀:
+    C_q  = np.dot(np.cross(m_hat, np.array([1j,  -1., 0.])), r0)  # coeff of GF*
+    C_qc = np.dot(np.cross(m_hat, np.array([-1j, -1., 0.])), r0)  # coeff of G*F (= C_q*)
+    C_f2 = np.dot(np.cross(m_hat, np.array([0.,   0., 1.])), r0)  # coeff of |F|²
+    C_g2 = -C_f2                                                    # coeff of |G|²
+
+    r_omega = np.zeros(len(frequencies), dtype=complex)
+    poly_list = qubit_seq._poly_list
+
+    for seg_idx, (F_func, G_func, t_start, t_end) in enumerate(
+            qubit_seq._polynomial_segments):
+        tau = t_end - t_start
+        if tau < 1e-15:
+            continue
+
+        poly_entry = poly_list[seg_idx]
+
+        if len(poly_entry) == 5:
+            # Free evolution: |F|², |G|², GF* all constant
+            f0, g0 = poly_entry[0], poly_entry[1]
+            q0 = g0 * np.conj(f0)
+            r_const = (C_g2 * abs(g0)**2 + C_f2 * abs(f0)**2
+                       + C_q * q0 + C_qc * np.conj(q0))
+            r_omega += r_const * _exp_integral(frequencies, t_start, t_end)
+        else:
+            # Continuous pulse: numerical quadrature
+            def _r(t):
+                ft, gt = F_func(t), G_func(t)
+                q = gt * np.conj(ft)
+                return (C_g2 * abs(gt)**2 + C_f2 * abs(ft)**2
+                        + C_q * q + C_qc * np.conj(q))
+
+            for fi, w in enumerate(frequencies):
+                def re_integrand(t, ww=w): return np.real(_r(t) * np.exp(-1j * ww * t))
+                def im_integrand(t, ww=w): return np.imag(_r(t) * np.exp(-1j * ww * t))
+                re_, _ = quad(re_integrand, t_start, t_end, limit=100)
+                im_, _ = quad(im_integrand, t_start, t_end, limit=100)
+                r_omega[fi] += re_ + 1j * im_
+
+    return frequencies, np.abs(r_omega)**2
+
+
+def kubo_filter_3level_analytic(seq, frequencies, m_y=1.0):
+    """
+    Analytic Kubo variance filter function for the 3-level clock system.
+
+    For measurement M = m_y·σ_y^{gm} on the |g⟩-|m⟩ clock transition and
+    initial state ψ₀ = (|g⟩+|m⟩)/√2, the sensitivity trajectory reduces to
+
+        r(t) = i·m_y·|G(t)|²
+
+    so that r(ω) = i·m_y·Chi(ω) and |r(ω)|² = m_y²·|Chi(ω)|², where
+
+        Chi(ω) = ∫₀ᵀ |G(t)|² e^{-iωt} dt.
+
+    For free-evolution segments |G(t)|² is constant → exact via
+    _exp_integral.  For continuous-pulse segments: numerical quadrature.
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+        Probe pulse sequence with compute_polynomials() already called.
+    frequencies : array_like
+        Angular frequencies at which to evaluate.
+    m_y : float
+        y-component of measurement direction in {|g⟩, |m⟩} Bloch sphere.
+
+    Returns
+    -------
+    frequencies : np.ndarray
+        Input frequencies.
+    F_kubo : np.ndarray
+        m_y²·|Chi(ω)|² at each frequency.
+    """
+    if not seq._polynomials_computed:
+        seq.compute_polynomials()
+
+    frequencies = np.asarray(frequencies, dtype=float)
+    Chi = np.zeros(len(frequencies), dtype=complex)
+    poly_list = seq._poly_list
+
+    for seg_idx, (F_func, G_func, t_start, t_end) in enumerate(seq._polynomial_segments):
+        tau = t_end - t_start
+        if tau < 1e-15:
+            continue
+
+        poly_entry = poly_list[seg_idx]
+
+        if len(poly_entry) == 5:
+            # Free evolution: |G(t)|² = |g0|² (constant)
+            g0 = poly_entry[1]
+            Chi += abs(g0)**2 * _exp_integral(frequencies, t_start, t_end)
+
+        elif len(poly_entry) == 7:
+            # Continuous pulse: numerical quadrature
+            _add_continuous_segment_chi(Chi, G_func, t_start, t_end, frequencies)
+
+    return frequencies, m_y**2 * np.abs(Chi)**2
+
+
 def analytic_three_level_filter(seq, frequencies, m_x=0.0, m_y=0.0, m_z=0.0):
     """
     Compute three-level clock filter functions analytically.

@@ -25,6 +25,14 @@ from quantum_pulse_suite.core.three_level_filter import (
     analytic_three_level_filter,
     three_level_noise_variance,
     Ff_analytic,
+    kubo_filter_2level,
+    kubo_filter_3level,
+    kubo_filter_2level_analytic,
+    kubo_filter_3level_analytic,
+)
+from quantum_pulse_suite import (
+    continuous_ramsey_sequence,
+    continuous_rabi_sequence,
 )
 
 
@@ -432,6 +440,149 @@ class TestCPMGPhiPeakShift(unittest.TestCase):
         # Peak frequency should increase with n
         self.assertGreater(peaks[1], peaks[0])
         self.assertGreater(peaks[2], peaks[1])
+
+
+class TestKuboFFTvsAnalytic(unittest.TestCase):
+    """FFT and analytic Kubo filter functions should agree on significant signal."""
+
+    M_HAT = np.array([0., 1., 0.])
+    R0    = np.array([1., 0., 0.])
+    N_FFT_SAMPLES = 8192
+    PAD = 4
+    N_CHECK = 50      # number of frequencies passed to the analytic function
+    RTOL = 0.05       # 5% relative tolerance at signal peaks
+
+    def setUp(self):
+        self.system = ThreeLevelClock()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _check_3level(self, seq3, label):
+        seq3.compute_polynomials()
+        T = seq3.total_duration()
+
+        freqs_fft, Fk_fft = kubo_filter_3level(
+            seq3, n_samples=self.N_FFT_SAMPLES, pad_factor=self.PAD)
+
+        # Pick ~N_CHECK frequencies in the informative band
+        band = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 50.0)
+        idx_sub = np.round(
+            np.linspace(0, band.sum() - 1, self.N_CHECK)).astype(int)
+        freqs_check  = freqs_fft[band][idx_sub]
+        Fk_fft_check = Fk_fft[band][idx_sub]
+
+        _, Fk_ana = kubo_filter_3level_analytic(seq3, freqs_check)
+
+        peak = max(np.max(Fk_fft_check), np.max(Fk_ana))
+        if peak < 1e-20:
+            return  # both are zero — nothing to compare
+
+        sig = (Fk_fft_check > 1e-3 * peak) & (Fk_ana > 1e-3 * peak)
+        if not np.any(sig):
+            return
+
+        rel_err = np.abs(Fk_fft_check[sig] - Fk_ana[sig]) / Fk_ana[sig]
+        self.assertLess(
+            np.max(rel_err), self.RTOL,
+            msg=f"{label}: max rel error {np.max(rel_err):.4f} > {self.RTOL}")
+
+    def _check_2level(self, seq2, label):
+        seq2.compute_polynomials()
+        T = seq2.total_duration()
+
+        freqs_fft, Fk_fft = kubo_filter_2level(
+            seq2, m_hat=self.M_HAT, r0=self.R0,
+            n_samples=self.N_FFT_SAMPLES, pad_factor=self.PAD)
+
+        band = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 50.0)
+        idx_sub = np.round(
+            np.linspace(0, band.sum() - 1, self.N_CHECK)).astype(int)
+        freqs_check  = freqs_fft[band][idx_sub]
+        Fk_fft_check = Fk_fft[band][idx_sub]
+
+        _, Fk_ana = kubo_filter_2level_analytic(
+            seq2, freqs_check, m_hat=self.M_HAT, r0=self.R0)
+
+        peak = max(np.max(Fk_fft_check), np.max(Fk_ana))
+        if peak < 1e-20:
+            return
+
+        sig = (Fk_fft_check > 1e-3 * peak) & (Fk_ana > 1e-3 * peak)
+        if not np.any(sig):
+            return
+
+        rel_err = np.abs(Fk_fft_check[sig] - Fk_ana[sig]) / Fk_ana[sig]
+        self.assertLess(
+            np.max(rel_err), self.RTOL,
+            msg=f"{label}: max rel error {np.max(rel_err):.4f} > {self.RTOL}")
+
+    # ------------------------------------------------------------------
+    # 3-level tests
+    # ------------------------------------------------------------------
+
+    def test_3level_ramsey_instant(self):
+        """Instantaneous Ramsey (free-evolution only): FFT matches analytic."""
+        for tau in [1.0, 2 * np.pi]:
+            seq = multilevel_ramsey(self.system, self.system.probe,
+                                    tau=tau, delta=0.0)
+            self._check_3level(seq, f"3L Ramsey instant tau={tau:.2f}")
+
+    def test_3level_ramsey_continuous(self):
+        """Continuous Ramsey (pi/2 pulses + free evolution): FFT matches analytic."""
+        T = 2 * np.pi
+        omega = 20 * np.pi
+        tau_pi2  = np.pi / (2 * omega)
+        tau_free = T - 2 * tau_pi2
+        seq = MultiLevelPulseSequence(self.system, self.system.probe)
+        seq.add_continuous_pulse(omega, [1, 0, 0], 0.0, tau_pi2)
+        seq.add_free_evolution(tau_free, 0.0)
+        seq.add_continuous_pulse(omega, [1, 0, 0], 0.0, tau_pi2)
+        self._check_3level(seq, "3L Ramsey continuous")
+
+    def test_3level_rabi(self):
+        """Single continuous Rabi pulse: FFT matches analytic."""
+        T = 2 * np.pi
+        seq = MultiLevelPulseSequence(self.system, self.system.probe)
+        seq.add_continuous_pulse(np.pi / T, [1, 0, 0], 0.0, T)
+        self._check_3level(seq, "3L Rabi m=1")
+
+    # ------------------------------------------------------------------
+    # 2-level tests
+    # ------------------------------------------------------------------
+
+    def test_2level_ramsey_continuous(self):
+        """Continuous Ramsey qubit: FFT matches analytic.
+
+        Uses a moderate pi/2-pulse frequency so the pulse duration (~0.25 s) is
+        well-resolved at N_FFT_SAMPLES=8192.  The very-fast-pulse case
+        (omega=20π) needs ~130k samples for FFT accuracy due to cancellation
+        between the two short pulses; that is a sampling limitation, not a bug.
+        """
+        T = 2 * np.pi
+        omega = 2 * np.pi   # tau_pi2 = T/4 = pi/2, well-sampled
+        seq = continuous_ramsey_sequence(omega=omega, tau=T, delta=0.0)
+        self._check_2level(seq, "2L Ramsey continuous (slow pulses)")
+
+    def test_2level_rabi(self):
+        """Single Rabi qubit: FFT matches analytic."""
+        T = 2 * np.pi
+        seq = continuous_rabi_sequence(omega=np.pi / T, tau=T, delta=0.0)
+        self._check_2level(seq, "2L Rabi m=1")
+
+    def test_2level_rabi_m2(self):
+        """Two Rabi cycles qubit (GPS m=2 proxy): FFT matches analytic.
+
+        The single continuous segment completes exactly one full cycle at the
+        midpoint (q=0 at both t=0 and t=T/2), which would fool the old
+        midpoint-heuristic free-evolution detector.  The _poly_list fix ensures
+        it is correctly treated as a continuous pulse.
+        """
+        T = 2 * np.pi
+        omega = 2 * 2 * np.pi / T   # 2 complete cycles
+        seq = continuous_rabi_sequence(omega=omega, tau=T, delta=0.0)
+        self._check_2level(seq, "2L GPS m=2 proxy")
 
 
 if __name__ == '__main__':
