@@ -37,6 +37,16 @@ from .detuning_optimization import (
     OptimizationResult,
 )
 
+from .pulse_optimizer import (
+    white_noise_psd,
+    one_over_f_psd,
+    build_equiangular_3level,
+    evaluate_sequence,
+    PulseOptimizationResult,
+    optimize_equiangular_sequence,
+    sweep_n_segments,
+)
+
 __all__ = [
     'bloch_vector_from_operator',
     'NumericalEvolution',
@@ -61,4 +71,12 @@ __all__ = [
     'frequency_estimation_variance',
     'optimize_detuning',
     'OptimizationResult',
+    # Equiangular pulse optimizer
+    'white_noise_psd',
+    'one_over_f_psd',
+    'build_equiangular_3level',
+    'evaluate_sequence',
+    'PulseOptimizationResult',
+    'optimize_equiangular_sequence',
+    'sweep_n_segments',
 ]
