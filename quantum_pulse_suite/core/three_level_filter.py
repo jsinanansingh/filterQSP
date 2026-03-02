@@ -629,6 +629,124 @@ def kubo_filter_2level_analytic(qubit_seq, frequencies,
     return frequencies, np.abs(r_omega)**2
 
 
+def kubo_filter_2level_full_analytic(seq, frequencies,
+                                     m_hat=(0., 1., 0.), r0=None):
+    """
+    Simple and full Kubo variance filter functions for a qubit.
+
+    Computes F̃(ω) = FT[R(t)](ω) for all three components of the
+    toggling-frame Bloch vector R(t) (Bloch vector of U†σ_z U), then
+    returns two filter functions derived from the sensitivity trajectory
+    Â(t) = (m̂ × R(t))·σ:
+
+        F_simple(ω) = |(m̂ × F̃(ω))·r₀|²
+            First-order Kubo: expectation value r(t) = ⟨ψ₀|Â(t)|ψ₀⟩ is
+            taken before the Fourier transform.  Equivalent to
+            kubo_filter_2level_analytic for these parameters.
+
+        F_full(ω) = |m̂ × F̃(ω)|² = |F̃(ω)|² - |m̂·F̃(ω)|²
+            FT of the two-time quantum correlator
+            ⟨ψ₀|Â(t)Â(t')|ψ₀⟩ (symmetric part), using
+            (a·σ)(b·σ) = a·b + i(a×b)·σ with the antisymmetric imaginary
+            term vanishing for symmetric noise PSDs.
+
+    The gap F_full − F_simple = |(m̂×F̃) − ((m̂×F̃)·r̂₀)r̂₀|² is the
+    component of m̂×F̃(ω) perpendicular to r₀, squared.
+
+    For free-evolution segments R(t) is constant → exact via
+    _exp_integral.  For continuous-pulse segments a dense time grid
+    with rectangular quadrature is used (n_quad=1024 points/segment).
+
+    Parameters
+    ----------
+    seq : PulseSequence
+        Qubit pulse sequence with compute_polynomials() already called.
+    frequencies : array_like
+        Angular frequencies at which to evaluate.
+    m_hat : array_like, shape (3,)
+        Bloch vector of measurement M = m̂·σ.  Default (0,1,0) = σ_y.
+    r0 : array_like, shape (3,), optional
+        Bloch vector of initial state ψ₀.  Default (1,0,0) for equal
+        superposition.  Pass (0,0,1) for the σ_z eigenstate |0⟩.
+
+    Returns
+    -------
+    frequencies : np.ndarray
+        Input frequencies.
+    F_simple : np.ndarray
+        |(m̂×F̃(ω))·r₀|² at each frequency.
+    F_full : np.ndarray
+        |m̂×F̃(ω)|² at each frequency.
+    """
+    if not seq._polynomials_computed:
+        seq.compute_polynomials()
+
+    m_hat = np.asarray(m_hat, dtype=float)
+    if r0 is None:
+        r0 = np.array([1., 0., 0.])
+    else:
+        r0 = np.asarray(r0, dtype=float)
+
+    frequencies = np.asarray(frequencies, dtype=float)
+    nf = len(frequencies)
+
+    # Ftilde[k, fi] = int R_k(t) e^{-i w_fi t} dt, accumulated over segments
+    Ftilde = np.zeros((3, nf), dtype=complex)
+    poly_list = seq._poly_list
+
+    for seg_idx, (F_func, G_func, t_start, t_end) in enumerate(
+            seq._polynomial_segments):
+        tau = t_end - t_start
+        if tau < 1e-15:
+            continue
+
+        poly_entry = poly_list[seg_idx]
+
+        if len(poly_entry) == 5:
+            # Free evolution: R(t) is constant (detuning phases cancel in
+            # f*g and |f|², |g|²)
+            f0, g0 = poly_entry[0], poly_entry[1]
+            fsg = np.conj(f0) * g0
+            R_const = np.array([
+                -2.0 * np.imag(fsg),       # R_x = -2 Im(f*g)
+                -2.0 * np.real(fsg),       # R_y = -2 Re(f*g)
+                abs(f0)**2 - abs(g0)**2,   # R_z = |f|² - |g|²
+            ])
+            exp_int = _exp_integral(frequencies, t_start, t_end)
+            Ftilde += R_const[:, np.newaxis] * exp_int[np.newaxis, :]
+
+        else:
+            # Continuous pulse: sample R(t) on a dense grid, then DFT
+            n_quad = 1024
+            t_grid = np.linspace(t_start, t_end, n_quad, endpoint=False)
+            dt = tau / n_quad
+
+            R_grid = np.empty((3, n_quad))
+            for i, t in enumerate(t_grid):
+                ft, gt = F_func(t), G_func(t)
+                fsg = np.conj(ft) * gt
+                R_grid[0, i] = -2.0 * np.imag(fsg)
+                R_grid[1, i] = -2.0 * np.real(fsg)
+                R_grid[2, i] = abs(ft)**2 - abs(gt)**2
+
+            # Vectorised DFT: (nf, n_quad) @ (n_quad, 3) → (nf, 3)
+            exp_kernel = np.exp(
+                -1j * np.outer(frequencies, t_grid))   # (nf, n_quad)
+            Ftilde += dt * (exp_kernel @ R_grid.T).T   # (3, nf)
+
+    # m̂ × F̃(ω): cross product of real m̂ with complex F̃ at each frequency
+    # np.cross(m_hat, Ftilde.T) broadcasts to (nf, 3); transpose → (3, nf)
+    mx_Ftilde = np.cross(m_hat, Ftilde.T).T    # (3, nf), complex
+
+    # F_simple(ω) = |(m̂×F̃)·r₀|²
+    F_simple = np.abs(r0 @ mx_Ftilde) ** 2     # (nf,)
+
+    # F_full(ω) = |m̂×F̃|² = Σ_k |(m̂×F̃)_k|²
+    F_full = np.sum(np.abs(mx_Ftilde) ** 2, axis=0)   # (nf,)
+
+    return frequencies, F_simple, F_full
+
+
 def kubo_filter_3level_analytic(seq, frequencies, m_y=1.0):
     """
     Analytic Kubo variance filter function for the 3-level clock system.

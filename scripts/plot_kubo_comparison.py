@@ -20,6 +20,13 @@ Three separate figures:
                = ½|Φ(ω)|² + |Chi(ω)|²
       dashed — simplified Kubo  m_y²|Chi(ω)|²  (Chi term only)
     Difference reveals the ½|Φ|² contribution absent from the Kubo approximation.
+
+  Figure 4 (2-level comparison):  kubo_filter_2level_full_analytic
+    Overlays per protocol:
+      solid  — F_full(ω)   = |m̂×F̃(ω)|²  (FT of two-time quantum correlator)
+      dashed — F_simple(ω) = |(m̂×F̃(ω))·r₀|²  (expectation value first, then |FT|²)
+    M = σ_y, ψ₀ = |0⟩ (σ_z eigenstate, r₀=(0,0,1)).
+    Gap = component of m̂×F̃ perpendicular to r₀, squared.
 """
 
 import numpy as np
@@ -36,6 +43,7 @@ from quantum_pulse_suite.core.multilevel import (
 )
 from quantum_pulse_suite.core.three_level_filter import (
     kubo_filter_2level_analytic,
+    kubo_filter_2level_full_analytic,
     kubo_filter_3level_analytic,
     analytic_three_level_filter,
 )
@@ -219,6 +227,51 @@ def main():
     for ext in ['pdf', 'png']:
         path = fig_dir / f'kubo_filter_comparison.{ext}'
         fig_cmp.savefig(path, dpi=DPI, bbox_inches='tight')
+        print(f"Saved: {path}")
+
+    # ── Figure 4: 2-level full vs simple Kubo (M=σ_y, ψ₀=|0⟩) ──────────────
+    print("Computing 2-level full vs simple Kubo (M=sigma_y, psi0=|0>)...")
+    M_HAT_SY = np.array([0., 1., 0.])   # σ_y
+    R0_SZ    = np.array([0., 0., 1.])   # σ_z eigenstate |0⟩
+
+    fig_2l, ax_2l = plt.subplots(figsize=FIGURE_SIZE)
+
+    for (color, label), s2 in zip(PROTOCOLS, seqs2):
+        print(f"  {label}")
+        _, Fs, Ff = kubo_filter_2level_full_analytic(
+            s2, frequencies, m_hat=M_HAT_SY, r0=R0_SZ)
+        ax_2l.loglog(frequencies, Ff / T_TOTAL**2 + 1e-20,
+                     color=color, lw=2,   ls='-',  label=label)
+        ax_2l.loglog(frequencies, Fs / T_TOTAL**2 + 1e-20,
+                     color=color, lw=1.5, ls='--')
+
+    from matplotlib.lines import Line2D
+    style_handles_2l = [
+        Line2D([0], [0], color='k', lw=2,   ls='-',
+               label=r'Full $|\hat{m}\times\tilde{F}(\omega)|^2$'),
+        Line2D([0], [0], color='k', lw=1.5, ls='--',
+               label=r'Simple $|(\hat{m}\times\tilde{F})\cdot r_0|^2$'),
+    ]
+    proto_legend_2l = ax_2l.legend(fontsize=9, loc='lower left')
+    ax_2l.add_artist(proto_legend_2l)
+    ax_2l.legend(handles=style_handles_2l, fontsize=9, loc='upper right')
+
+    ax_2l.set_xlabel(r'$\omega$ (rad/s)', fontsize=12)
+    ax_2l.set_ylabel(r'$F(\omega) / T^2$', fontsize=12)
+    ax_2l.set_title(
+        r'2-level: Full $|\hat{m}\times\tilde{F}|^2$ (solid) vs '
+        r'Simple $|(\hat{m}\times\tilde{F})\cdot r_0|^2$ (dashed)'
+        '\n'
+        r'$M=\sigma_y$,  $\psi_0 = |0\rangle$ ($\sigma_z$ eigenstate, '
+        r'$r_0=(0,0,1)$)',
+        fontsize=11)
+    ax_2l.set_xlim([FREQ_MIN, FREQ_MAX])
+    ax_2l.grid(True, alpha=0.3, which='both')
+    fig_2l.tight_layout()
+
+    for ext in ['pdf', 'png']:
+        path = fig_dir / f'kubo_2level_comparison.{ext}'
+        fig_2l.savefig(path, dpi=DPI, bbox_inches='tight')
         print(f"Saved: {path}")
 
     plt.close('all')
