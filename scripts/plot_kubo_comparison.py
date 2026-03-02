@@ -25,7 +25,7 @@ Three separate figures:
     Overlays per protocol:
       solid  — F_full(ω)   = |m̂×F̃(ω)|²  (FT of two-time quantum correlator)
       dashed — F_simple(ω) = |(m̂×F̃(ω))·r₀|²  (expectation value first, then |FT|²)
-    M = σ_y, ψ₀ = |0⟩ (σ_z eigenstate, r₀=(0,0,1)).
+    M = σ_y, ψ₀ = (|0⟩+|1⟩)/√2 (equal superposition, r₀=(1,0,0)).
     Gap = component of m̂×F̃ perpendicular to r₀, squared.
 """
 
@@ -230,9 +230,9 @@ def main():
         print(f"Saved: {path}")
 
     # ── Figure 4: 2-level full vs simple Kubo (M=σ_y, ψ₀=|0⟩) ──────────────
-    print("Computing 2-level full vs simple Kubo (M=sigma_y, psi0=|0>)...")
+    print("Computing 2-level full vs simple Kubo (M=sigma_y, r0=(1,0,0))...")
     M_HAT_SY = np.array([0., 1., 0.])   # σ_y
-    R0_SZ    = np.array([0., 0., 1.])   # σ_z eigenstate |0⟩
+    R0_SZ    = np.array([1., 0., 0.])   # equal superposition (|0⟩+|1⟩)/√2
 
     fig_2l, ax_2l = plt.subplots(figsize=FIGURE_SIZE)
 
@@ -262,8 +262,8 @@ def main():
         r'2-level: Full $|\hat{m}\times\tilde{F}|^2$ (solid) vs '
         r'Simple $|(\hat{m}\times\tilde{F})\cdot r_0|^2$ (dashed)'
         '\n'
-        r'$M=\sigma_y$,  $\psi_0 = |0\rangle$ ($\sigma_z$ eigenstate, '
-        r'$r_0=(0,0,1)$)',
+        r'$M=\sigma_y$,  $\psi_0 = (|0\rangle+|1\rangle)/\sqrt{2}$, '
+        r'$r_0=(1,0,0)$',
         fontsize=11)
     ax_2l.set_xlim([FREQ_MIN, FREQ_MAX])
     ax_2l.grid(True, alpha=0.3, which='both')
