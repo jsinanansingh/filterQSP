@@ -919,6 +919,215 @@ def _add_continuous_segment_chi(Chi, G_func, t_start, t_end, frequencies):
         Chi[fi] += re_part + 1j * im_part
 
 
+def _probe_ck_at_delta(seq, delta_extra):
+    """
+    Evaluate the probe-subspace Cayley-Klein parameters (f, g) with an
+    additional global laser detuning delta_extra on top of each element's
+    stored delta.
+
+    The laser detuning acts on every time-evolution segment as
+        H_delta = delta/2 * (|e><e| - |g><g|)
+    giving the probe SU(2) update
+        diag(exp(+i delta tau/2),  exp(-i delta tau/2))
+    for free evolution of duration tau.  Continuous-pulse elements use the
+    full off-resonant Rabi formula with delta_total = element.delta + delta_extra.
+    Instantaneous pulses are delta-independent.
+
+    Works for both MultiLevelPulseSequence (3-level) and PulseSequence (2-level).
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence or ContinuousPulseSequence
+        Pulse sequence whose elements have .delta, .tau, .omega, .axis attributes.
+    delta_extra : float
+        Extra detuning to add globally to every segment.
+
+    Returns
+    -------
+    f, g : complex
+        Final Cayley-Klein amplitudes of the probe subspace.
+    """
+    # Local imports to avoid circular dependencies
+    from quantum_pulse_suite.core.multilevel import (
+        MultiLevelFreeEvolution, MultiLevelInstantPulse, MultiLevelContinuousPulse,
+    )
+    from quantum_pulse_suite.core.pulse_sequence import (
+        FreeEvolution, InstantaneousPulse, ContinuousPulse,
+    )
+
+    f, g = 1.0 + 0j, 0.0 + 0j
+
+    for element in seq.elements:
+
+        # ── Free evolution ───────────────────────────────────────────────────
+        if isinstance(element, (MultiLevelFreeEvolution, FreeEvolution)):
+            delta_total = element.delta + delta_extra
+            tau = element.tau
+            # U_free = diag(exp(+i delta_total tau/2),  exp(-i delta_total tau/2))
+            # Both f and g pick up the same phase factor (see compute_polynomials):
+            phase = np.exp(1j * delta_total * tau / 2)
+            f, g = phase * f, phase * g
+
+        # ── Instantaneous pulse ──────────────────────────────────────────────
+        elif isinstance(element, (MultiLevelInstantPulse, InstantaneousPulse)):
+            axis = element.axis
+            angle = element.angle
+            ch = np.cos(angle / 2)
+            sh = np.sin(angle / 2)
+            if np.allclose(axis, [1, 0, 0]):
+                f, g = (f * ch - np.conj(g) * sh,
+                        g * ch + np.conj(f) * sh)
+            elif np.allclose(axis, [0, 1, 0]):
+                f, g = (f * ch - 1j * np.conj(g) * sh,
+                        g * ch + 1j * np.conj(f) * sh)
+            else:
+                # General axis: use the stored 2×2 unitary
+                U2 = (element.subspace_unitary()
+                      if hasattr(element, 'subspace_unitary') else element.unitary())
+                f, g = (U2[0, 0] * f + U2[0, 1] / 1j * np.conj(g),
+                        U2[1, 0] / 1j * np.conj(f) + U2[1, 1] * g)
+
+        # ── Continuous pulse ─────────────────────────────────────────────────
+        elif isinstance(element, (MultiLevelContinuousPulse, ContinuousPulse)):
+            omega = element.omega
+            axis  = element.axis
+            n_x, n_y, n_z = axis
+            delta_total = element.delta + delta_extra
+            tau  = element.tau
+            # Effective Rabi frequency at total detuning
+            rabi = np.sqrt(delta_total**2 + 2 * n_z * delta_total * omega + omega**2)
+            if rabi < 1e-15:
+                rabi = 1e-15
+            ch = np.cos(rabi * tau / 2)
+            sh = np.sin(rabi * tau / 2)
+            # Common diagonal term of the SU(2) propagator
+            diag = ch + 1j * (delta_total + n_z * omega) / rabi * sh
+            off  = omega / rabi * sh
+            f_new = diag * f + (-n_x + 1j * n_y) * off * np.conj(g)
+            g_new = (n_x - 1j * n_y) * off * np.conj(f) + diag * g
+            f, g = f_new, g_new
+
+    return f, g
+
+
+def detuning_sensitivity(seq, M=None, psi0=None, delta=0.0, eps=1e-7):
+    """
+    Compute |partial_delta <M>|^2 for a three-level clock sequence.
+
+    The laser detuning delta shifts ALL segments uniformly via
+        H_delta = delta/2 * (|e><e| - |g><g|).
+    The sensitivity at the chosen operating point is found by central
+    finite differences on the exact CK propagator:
+        partial_delta <M> approx (<M>(delta+eps) - <M>(delta-eps)) / (2 eps).
+
+    Default observable M = sigma_y^{gm} = -i|g><m| + i|m><g| and
+    default initial state psi0 = (|g> + |m>)/sqrt(2).
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+        Three-level probe sequence.
+    M : np.ndarray, shape (d, d), optional
+        Measurement observable.  Default: sigma_y on the |g>-|m> clock
+        transition.
+    psi0 : np.ndarray, shape (d,), optional
+        Initial state vector.  Default: (|g> + |m>)/sqrt(2).
+    delta : float
+        Operating-point detuning at which to evaluate the slope (default 0).
+    eps : float
+        Finite-difference step size in detuning units (default 1e-7).
+
+    Returns
+    -------
+    dM_ddelta : float
+        partial_delta <M> at the operating point.
+    sens_sq : float
+        |partial_delta <M>|^2.
+    """
+    d   = seq.dim
+    i_g, i_e = seq.subspace._levels
+    i_m = next(i for i in range(d) if i not in (i_g, i_e))
+
+    if psi0 is None:
+        psi0 = np.zeros(d, dtype=complex)
+        psi0[i_g] = 1.0 / np.sqrt(2)
+        psi0[i_m] = 1.0 / np.sqrt(2)
+    else:
+        psi0 = np.asarray(psi0, dtype=complex)
+
+    if M is None:
+        M = np.zeros((d, d), dtype=complex)
+        M[i_g, i_m] = -1j   # sigma_y^{gm}
+        M[i_m, i_g] =  1j
+    else:
+        M = np.asarray(M, dtype=complex)
+
+    def expectation(delta_extra):
+        f, g = _probe_ck_at_delta(seq, delta_extra)
+        psi_f = np.empty(d, dtype=complex)
+        psi_f[i_g] = f               * psi0[i_g] + 1j * g           * psi0[i_e]
+        psi_f[i_e] = 1j * np.conj(g) * psi0[i_g] + np.conj(f)       * psi0[i_e]
+        psi_f[i_m] = psi0[i_m]
+        return float(np.real(psi_f.conj() @ M @ psi_f))
+
+    dM_ddelta = (expectation(delta + eps) - expectation(delta - eps)) / (2.0 * eps)
+    return dM_ddelta, dM_ddelta ** 2
+
+
+def detuning_sensitivity_2level(seq, m_hat=None, r0=None, delta=0.0, eps=1e-7):
+    """
+    Compute |partial_delta <M>|^2 for a two-level qubit sequence.
+
+    The laser detuning delta shifts ALL segments uniformly.
+    <M>(delta) = m_hat . R(delta) . r0  where R(delta) is the SO(3) rotation
+    matrix corresponding to the probe SU(2) propagator at total detuning delta.
+    The slope is found via central finite differences.
+
+    Parameters
+    ----------
+    seq : ContinuousPulseSequence or InstantaneousPulseSequence
+        Two-level qubit pulse sequence.
+    m_hat : array_like, shape (3,), optional
+        Bloch vector of measurement observable M = m_hat . sigma.
+        Default (0, 1, 0) = sigma_y.
+    r0 : array_like, shape (3,), optional
+        Bloch vector of initial state psi0.
+        Default (1, 0, 0) for equal superposition (|0>+|1>)/sqrt(2).
+    delta : float
+        Operating-point detuning (default 0).
+    eps : float
+        Finite-difference step size (default 1e-7).
+
+    Returns
+    -------
+    dM_ddelta : float
+        partial_delta <M> at the operating point.
+    sens_sq : float
+        |partial_delta <M>|^2.
+    """
+    if m_hat is None:
+        m_hat = np.array([0., 1., 0.])
+    if r0 is None:
+        r0 = np.array([1., 0., 0.])
+    m_hat = np.asarray(m_hat, dtype=float)
+    r0    = np.asarray(r0,    dtype=float)
+
+    def expectation(delta_extra):
+        f, g = _probe_ck_at_delta(seq, delta_extra)
+        # SU(2) → SO(3): U^dag sigma_j U = sum_k R_jk sigma_k
+        a, b = np.real(f), np.imag(f)
+        c, d_g = np.real(g), np.imag(g)
+        R = np.array([
+            [a**2 + c**2 - b**2 - d_g**2,  2*(c*d_g - a*b),            2*(a*d_g + b*c)          ],
+            [2*(a*b + c*d_g),               a**2 + d_g**2 - b**2 - c**2, 2*(b*d_g - a*c)          ],
+            [2*(b*c - a*d_g),               2*(a*c + b*d_g),             a**2 + b**2 - c**2 - d_g**2],
+        ])
+        return float(np.dot(m_hat, R @ r0))
+
+    dM_ddelta = (expectation(delta + eps) - expectation(delta - eps)) / (2.0 * eps)
+    return dM_ddelta, dM_ddelta ** 2
+
+
 def three_level_noise_variance(Fe, Ff, frequencies, S_e, S_f):
     """
     Compute total noise variance <dM^2> from filter functions and PSDs.

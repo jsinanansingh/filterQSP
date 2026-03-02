@@ -83,6 +83,8 @@ from .three_level_filter import (
     analytic_three_level_filter,
     three_level_noise_variance,
     Ff_analytic,
+    detuning_sensitivity,
+    detuning_sensitivity_2level,
 )
 
 from .spin_displacement import (
