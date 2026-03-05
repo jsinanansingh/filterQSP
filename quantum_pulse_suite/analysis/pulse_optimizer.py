@@ -223,6 +223,7 @@ def optimize_equiangular_sequence(
     N: int,
     noise_psd: Union[str, Callable] = 'white',
     omega_max: Optional[float] = None,
+    omega_fixed: Optional[float] = None,
     m_y: float = 1.0,
     M=None,
     psi0=None,
@@ -253,6 +254,11 @@ def optimize_equiangular_sequence(
         'white', '1/f', or a callable S(omega).
     omega_max : float, optional
         Upper bound on Omega.  Default: N * pi / T (one pi-pulse per segment).
+        Ignored when omega_fixed is set.
+    omega_fixed : float, optional
+        If provided, fix Omega to this value and optimise phases only.
+        Useful for isolating the effect of phase modulation vs GPS at the
+        same Rabi frequency.
     m_y : float
         Measurement weight m_y for Fe computation (default 1.0).
     M : np.ndarray, optional
@@ -280,9 +286,6 @@ def optimize_equiangular_sequence(
     """
     rng = np.random.default_rng(seed)
 
-    if omega_max is None:
-        omega_max = N * np.pi / T   # maximum: one pi-pulse per segment
-
     # Resolve noise PSD
     if isinstance(noise_psd, str):
         if noise_psd not in _PSD_PRESETS:
@@ -293,6 +296,81 @@ def optimize_equiangular_sequence(
     else:
         S_func = noise_psd
         noise_label = 'custom'
+
+    if omega_fixed is not None:
+        # ── Phase-only optimisation at fixed Omega ────────────────────────────
+        # x = [phi_2, ..., phi_N]  (N-1 free phases; phi_1 = 0 fixed)
+        phase_bounds = [(0.0, 2.0 * np.pi)] * (N - 1)
+
+        def unpack_phases(x):
+            phases = np.concatenate([[0.0], x])
+            return omega_fixed, phases
+
+        def objective_phases(x):
+            omega, phases = unpack_phases(x)
+            try:
+                seq = build_equiangular_3level(system, T, N, omega, phases)
+                _, sens_sq = detuning_sensitivity(seq, M=M, psi0=psi0)
+                if sens_sq < 1e-20:
+                    return 1e10
+                freqs, Fe, _, _ = fft_three_level_filter(
+                    seq, n_samples=n_fft, pad_factor=pad_factor, m_y=m_y)
+                kubo_var = float(simpson(Fe * S_func(freqs), x=freqs) / (2.0 * np.pi))
+                if kubo_var < 1e-30:
+                    return 1e10
+                return kubo_var / sens_sq
+            except Exception:
+                return 1e10
+
+        if N == 1:
+            # No free phases: single segment at fixed omega, evaluate directly.
+            best_phases = np.array([0.0])
+            best_omega  = omega_fixed
+        else:
+            de_result = differential_evolution(
+                objective_phases,
+                phase_bounds,
+                seed=int(rng.integers(2**31)),
+                popsize=popsize,
+                tol=tol,
+                maxiter=maxiter,
+                polish=True,
+                workers=1,
+            )
+            best_x_ph  = de_result.x.copy()
+            best_val   = de_result.fun
+
+            for _ in range(n_restarts):
+                x0 = rng.uniform(0.0, 2.0 * np.pi, N - 1)
+                res = minimize(
+                    objective_phases, x0,
+                    method='L-BFGS-B',
+                    bounds=phase_bounds,
+                    options={'maxiter': 500, 'ftol': 1e-12, 'gtol': 1e-8},
+                )
+                if res.success and res.fun < best_val:
+                    best_val  = res.fun
+                    best_x_ph = res.x.copy()
+
+            best_omega, best_phases = unpack_phases(best_x_ph)
+
+        seq_opt = build_equiangular_3level(system, T, N, best_omega, best_phases)
+        sens_sq, kubo_var, fom = evaluate_sequence(
+            seq_opt, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_fft=n_fft, pad_factor=pad_factor)
+        return PulseOptimizationResult(
+            omega=best_omega,
+            phases=best_phases,
+            sensitivity_sq=sens_sq,
+            kubo_var=kubo_var,
+            fom=fom,
+            noise_label=noise_label,
+            seq=seq_opt,
+        )
+
+    # ── Joint Omega + phase optimisation ─────────────────────────────────────
+    if omega_max is None:
+        omega_max = N * np.pi / T   # maximum: one pi-pulse per segment
 
     # Parameter layout: x = [omega, phi_2, ..., phi_N]   (N free params total)
     # phi_1 = 0 is fixed to break the global-phase gauge redundancy.
