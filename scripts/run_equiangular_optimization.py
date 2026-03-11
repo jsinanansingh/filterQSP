@@ -33,6 +33,8 @@ T          = 2 * np.pi
 OMEGA_CUTOFF = 2 * np.pi / T
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 CACHE_PREFIX = 'equiangular_opt_cache'
+OBJECTIVE_MODE = 'normalized_difference'
+OBJECTIVE_WEIGHT = 1.0
 
 # ── Noise models ──────────────────────────────────────────────────────────────
 NOISE_SPECS = [
@@ -81,12 +83,14 @@ def main():
                 system, T, N,
                 noise_psd=S_func,
                 omega_cutoff=OMEGA_CUTOFF,
+                objective_mode=OBJECTIVE_MODE,
+                objective_weight=OBJECTIVE_WEIGHT,
                 **bud,
             )
             results[N][key] = r
             print(f'  Omega*T = {r.omega * T:.5f}', flush=True)
             print(f'  phases  = {np.array2string(r.phases, precision=4, separator=", ")}', flush=True)
-            print(f'  sens_sq = {r.sensitivity_sq:.4f}  noise_var = {r.noise_var:.4e}  sigma_nu = {r.sigma_nu:.3f}', flush=True)
+            print(f'  sens_sq = {r.sensitivity_sq:.4f}  noise_var = {r.noise_var:.4e}  score = {r.objective_score:.3f}  sigma_nu = {r.sigma_nu:.3f}', flush=True)
 
     # ── Save cache ────────────────────────────────────────────────────────────
     d = {}
@@ -99,6 +103,8 @@ def main():
             d[f'{pk}_sens_sq']     = np.array(r.sensitivity_sq)
             d[f'{pk}_noise_var']   = np.array(r.noise_var)
             d[f'{pk}_sigma_nu']    = np.array(r.sigma_nu)
+            d[f'{pk}_objective_score'] = np.array(r.objective_score)
+            d[f'{pk}_objective_mode']  = np.array(r.objective_mode)
     cache_path = cache_path_for_timestamp()
     np.savez(str(cache_path), **d)
     print(f'\nCache saved to {cache_path}', flush=True)
@@ -112,6 +118,16 @@ def main():
         row = f'Equiangular N={N:<2}'
         for key in noise_keys:
             row += f' {results[N][key].sigma_nu:>20.3f}'
+        print(row)
+
+    print('\n\n--- Objective-score table ---')
+    hdr = f'{"Protocol":<24}' + ''.join(f' {"score " + lbl:>20}' for lbl in noise_labels)
+    print(hdr)
+    print('-' * len(hdr))
+    for N in N_values:
+        row = f'Equiangular N={N:<2}'
+        for key in noise_keys:
+            row += f' {results[N][key].objective_score:>20.3f}'
         print(row)
 
     # ── Print LaTeX table fragment ────────────────────────────────────────────
@@ -133,7 +149,7 @@ def main():
         for key, label, _ in NOISE_SPECS:
             r = results[N][key]
             phs_str = np.array2string(r.phases, precision=4, separator=', ')
-            print(f'  {label}:  OmegaT={r.omega*T:.5f}  sigma_nu={r.sigma_nu:.3f}')
+            print(f'  {label}:  OmegaT={r.omega*T:.5f}  score={r.objective_score:.3f}  sigma_nu={r.sigma_nu:.3f}')
             print(f'    phases = {phs_str}')
 
     return results

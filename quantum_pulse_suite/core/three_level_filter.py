@@ -112,50 +112,77 @@ def _exp_integral(w, t_start, t_end):
 
 
 def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
-                           m_x=0.0, m_y=0.0, m_z=0.0):
+                           M=None, psi0=None, m_z=0.0,
+                           m_x=0.0, m_y=0.0):
     """
-    Compute three-level clock filter functions via FFT.
+    Compute the three-level clock filter function via direct matrix multiplication.
 
-    Samples chi(t) = |G(t)|^2 on a time grid, zero-pads, and FFTs to obtain
-    Chi(w).  Also computes phi(t) = F*(t)G(t) → Phi(w) for diagnostics.
-    Constructs the classical noise filter function:
+    This is the ground-truth validation function.  At each time point it forms
+    the full propagator U(t), the toggled noise A_e(t) = U†(t)|e><e|U(t), and
+    the interaction-frame observable M_I(T) = U†(T) M U(T), then computes the
+    sensitivity trajectory
 
-        F(w) = m_y^2 * |Chi(w)|^2
+        r(t) = <psi0 | [M_I(T), A_e(t)] | psi0>
+
+    by explicit d×d matrix multiplication.  No Cayley-Klein / phi-chi
+    decomposition is assumed.  The filter function is
+
+        Fe(w) = |FT[r(t)](w)|^2.
+
+    Since [M_I(T), A_e(t)] is anti-Hermitian, r(t) is purely imaginary; the
+    signal slope S = -i ∫ r(t) dt is therefore manifestly real.
 
     Parameters
     ----------
     seq : MultiLevelPulseSequence
-        Pulse sequence on the probe transition {|g>, |e>}.
     n_samples : int
-        Number of time samples (power of 2 recommended).
     pad_factor : int
-        Zero-padding factor for spectral interpolation.
-    m_x, m_y, m_z : float
-        Components of measurement direction in {|g>, |m>} Bloch sphere.
-        Only m_y enters F(w); m_x, m_z are accepted for API compatibility.
+    M : ndarray (d,d), optional
+        Measurement observable.  Default: sigma_y^{gm}.
+    psi0 : ndarray (d,), optional
+        Initial state.  Default: (|g>+|m>)/sqrt(2).
+    m_z : float
+        Used only for the clock-noise Ff (protocol-independent).
+    m_x, m_y : float
+        Accepted for API compatibility; ignored for Fe.
 
     Returns
     -------
-    frequencies : np.ndarray
-        Positive angular frequencies.
-    Fe : np.ndarray
-        e-noise filter function F(w) = m_y^2 |Chi(w)|^2 at each frequency.
-    Ff : np.ndarray
-        m-noise filter function at each frequency.
-    Chi : np.ndarray
-        Spectral quantity Chi(w) = FT[|G(t)|^2] at each frequency.
+    frequencies : np.ndarray  (positive angular frequencies)
+    Fe : np.ndarray            filter function |FT[r(t)]|^2
+    Ff : np.ndarray            clock-noise filter function (protocol-independent)
+    r_fft : np.ndarray         FT[r(t)] at positive frequencies (complex, for diagnostics)
     """
+    d = seq.dim
+    subspace = seq.subspace
+    i_g, i_e = subspace._levels
+    i_m = next(i for i in range(d) if i not in (i_g, i_e))
+
+    if M is None:
+        M = np.zeros((d, d), dtype=complex)
+        M[i_g, i_m] = -1j
+        M[i_m, i_g] =  1j
+
+    if psi0 is None:
+        psi0 = np.zeros(d, dtype=complex)
+        psi0[i_g] = 1.0 / np.sqrt(2)
+        psi0[i_m] = 1.0 / np.sqrt(2)
+
+    M    = np.asarray(M,    dtype=complex)
+    psi0 = np.asarray(psi0, dtype=complex)
+
+    # Noise operator |e><e| in full space
+    H_noise = np.zeros((d, d), dtype=complex)
+    H_noise[i_e, i_e] = 1.0
+
     T = seq.total_duration()
     dt = T / n_samples
-    subspace = seq.subspace
     elements = seq.elements
-    d = seq.dim
 
-    # Precompute segment boundaries and cumulative unitaries for efficiency
+    # Build segment list (non-zero duration elements) with cumulative U before each
     segments = []
     U_cumulative = np.eye(d, dtype=complex)
     cumtime = 0.0
-
     for elem in elements:
         dur = elem.duration()
         if dur == 0:
@@ -163,18 +190,17 @@ def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
         else:
             H_elem = elem.hamiltonian()
             eigvals, V = np.linalg.eigh(H_elem)
-            segments.append((
-                cumtime, cumtime + dur,
-                eigvals, V, V.conj().T,
-                U_cumulative.copy()
-            ))
+            segments.append((cumtime, cumtime + dur, eigvals, V, V.conj().T,
+                             U_cumulative.copy()))
             U_cumulative = elem.unitary() @ U_cumulative
             cumtime += dur
 
-    # Sample phi(t) = F*(t) G(t) and chi(t) = |G(t)|^2 at discrete times
+    # M_I(T) = U†(T) M U(T)
+    M_I_T = U_cumulative.conj().T @ M @ U_cumulative
+
+    # Sample r(t) at uniform time grid
     times = np.linspace(0, T, n_samples, endpoint=False)
-    phi_samples = np.zeros(n_samples, dtype=complex)
-    chi_samples = np.zeros(n_samples, dtype=float)
+    r_samples = np.zeros(n_samples, dtype=complex)
 
     for seg_start, seg_end, eigvals, V, Vdag, U_before in segments:
         mask = (times >= seg_start) & (times < seg_end)
@@ -186,41 +212,30 @@ def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
             U_partial = V @ (exp_diag[:, None] * Vdag)
             U_t = U_partial @ U_before
 
-            # Project to 2x2 subspace
-            U_sub = subspace.project_operator(U_t)
+            # A_e(t) = U†(t) |e><e| U(t)
+            A_e = U_t.conj().T @ H_noise @ U_t
 
-            # Extract Cayley-Klein parameters: U_sub = [[f, ig], [ig*, f*]]
-            f_t = U_sub[0, 0]
-            g_t = U_sub[0, 1] / 1j
+            # [M_I(T), A_e(t)]
+            comm = M_I_T @ A_e - A_e @ M_I_T
 
-            phi_samples[idx] = np.conj(f_t) * g_t
-            chi_samples[idx] = np.abs(g_t)**2
+            # r(t) = <psi0|comm|psi0>  (purely imaginary)
+            r_samples[idx] = psi0.conj() @ comm @ psi0
 
     # Zero-pad and FFT
     n_padded = pad_factor * n_samples
-    phi_padded = np.zeros(n_padded, dtype=complex)
-    phi_padded[:n_samples] = phi_samples
-    chi_padded = np.zeros(n_padded, dtype=float)
-    chi_padded[:n_samples] = chi_samples
-
-    # FFT convention: Phi(w) = int phi(t) e^{-iwt} dt ~ dt * sum phi[n] e^{-iwt_n}
-    Phi_fft = np.fft.fft(phi_padded) * dt
-    Chi_fft = np.fft.fft(chi_padded) * dt
+    r_padded = np.zeros(n_padded, dtype=complex)
+    r_padded[:n_samples] = r_samples
+    r_fft = np.fft.fft(r_padded) * dt
     freqs = 2 * np.pi * np.fft.fftfreq(n_padded, d=dt)
 
-    # Positive frequencies only
     pos_mask = freqs > 0
     freqs_pos = freqs[pos_mask]
-    Phi_pos = Phi_fft[pos_mask]
-    Chi_pos = Chi_fft[pos_mask]
+    r_pos = r_fft[pos_mask]
 
-    # F(w) = m_y^2 * |Chi|^2  (classical noise filter function)
-    Fe = m_y**2 * np.abs(Chi_pos)**2
-
-    # Construct Ff(w)
+    Fe = np.abs(r_pos)**2
     Ff = Ff_analytic(freqs_pos, T, m_z)
 
-    return freqs_pos, Fe, Ff, Chi_pos
+    return freqs_pos, Fe, Ff, r_pos
 
 
 def direct_dft_filter(seq, omega_array, n_samples=4096, m_y=1.0):
@@ -298,14 +313,19 @@ def direct_dft_filter(seq, omega_array, n_samples=4096, m_y=1.0):
             phi_samples[idx] = np.conj(f_t) * g_t
             chi_samples[idx] = np.abs(g_t)**2
 
-    # Direct DFT at requested frequencies via matrix multiply
-    # Phi(w) = dt * sum_k phi[k] * exp(-i*w*t[k])
-    # Shape: (n_omega, n_samples) @ (n_samples,) -> (n_omega,)
-    phases = np.exp(-1j * np.outer(omega_array, times))  # (n_omega, n_time)
-    Phi = phases @ phi_samples * dt
-    Chi = phases @ chi_samples * dt
+    # Extract F(T), G(T) from the final propagator U_cumulative = U(T)
+    U_T_sub = subspace.project_operator(U_cumulative)
+    F_T = U_T_sub[0, 0]
+    G_T = U_T_sub[0, 1] / 1j
 
-    Fe = m_y**2 * np.abs(Chi)**2
+    # Correct sensitivity kernel h(t) = Re[F(T)]*chi(t) + Re[G(T)*phi(t)]
+    h_samples = np.real(F_T) * chi_samples + np.real(G_T * phi_samples)
+
+    # Direct DFT at requested frequencies
+    phases = np.exp(-1j * np.outer(omega_array, times))  # (n_omega, n_time)
+    H = phases @ h_samples * dt
+
+    Fe = np.abs(H)**2
     return omega_array, Fe
 
 
@@ -619,6 +639,13 @@ def kubo_filter_3level(seq, M=None, psi0=None, n_samples=4096, pad_factor=4):
     M    = np.asarray(M,    dtype=complex)
     psi0 = np.asarray(psi0, dtype=complex)
 
+    # Compute U(T) to form M_I(T) = U†(T) M U(T)
+    # U(T) is the product of all element unitaries.
+    U_T = np.eye(d, dtype=complex)
+    for elem in seq.elements:
+        U_T = elem.unitary() @ U_T
+    M_I_T = U_T.conj().T @ M @ U_T
+
     # Noise: |e⟩⟨e| in probe subspace → [[0,0],[0,1]]
     H_noise_sub = np.array([[0, 0], [0, 1]], dtype=complex)
 
@@ -647,9 +674,10 @@ def kubo_filter_3level(seq, M=None, psi0=None, n_samples=4096, pad_factor=4):
                 for lj, j in enumerate((i_g, i_e)):
                     H_tilde[i, j] = H_tilde_sub[li, lj]
 
-            # r(t) = ⟨ψ₀|[M, H̃]|ψ₀⟩  (M and H̃ are Hermitian → r is imaginary)
-            MH = M @ H_tilde
-            commutator = MH - MH.conj().T        # = [M, H̃]
+            # r(t) = ⟨ψ₀|[M_I(T), H̃(t)]|ψ₀⟩  (purely imaginary)
+            # Using M_I(T) = U†(T)MU(T) instead of bare M.
+            MH = M_I_T @ H_tilde
+            commutator = MH - MH.conj().T        # = [M_I(T), H̃]
             r_samples[idx] = psi0.conj() @ commutator @ psi0
 
     # Zero-pad and FFT
@@ -1359,11 +1387,15 @@ def analytic_filter(seq, omega_array, m_y=1.0):
 
     omega_array = np.asarray(omega_array, dtype=float)
     n_w = len(omega_array)
-    Phi = np.zeros(n_w, dtype=complex)
-    Chi = np.zeros(n_w, dtype=complex)
+    # Evaluate at +omega and -omega to build the correct filter kernel:
+    #   H(w) = Re[F(T)]*Chi(w) + G(T)/2*Phi(w) + conj(G(T))/2*conj(Phi(-w))
+    omega_both = np.concatenate([omega_array, -omega_array])
+    Phi = np.zeros(2 * n_w, dtype=complex)
+    Chi = np.zeros(2 * n_w, dtype=complex)
+    _oa = omega_both   # alias used in loop body
 
-    a = 1.0 + 0j   # f_{j-1}
-    b = 0.0 + 0j   # g_{j-1}
+    a = 1.0 + 0j   # f_{j-1}; equals F(T) after loop
+    b = 0.0 + 0j   # g_{j-1}; equals G(T) after loop
     t_start = 0.0
 
     for elem in seq.elements:
@@ -1389,8 +1421,8 @@ def analytic_filter(seq, omega_array, m_y=1.0):
                 continue
             # Omega=0: phi_j = conj(a)*b (constant), chi_j = |b|^2 (constant).
             # Unified formula with Omega=0: I_cos(w,0,tau)=I_exp(w,tau), I_sin=0.
-            phase = np.exp(-1j * omega_array * t_start)
-            I_e = _I_exp_local(omega_array, tau)
+            phase = np.exp(-1j * _oa * t_start)
+            I_e = _I_exp_local(_oa, tau)
             Phi += phase * np.conj(a) * b * I_e
             Chi += phase * (abs(b) ** 2) * I_e
             # CK amplitudes unchanged for delta=0; phase factor if delta != 0.
@@ -1423,10 +1455,10 @@ def analytic_filter(seq, omega_array, m_y=1.0):
                 B_chi = 0.5 * (abs(b) ** 2 - abs(a) ** 2)
                 C_chi = float(np.real(em * a * b))           # real scalar
 
-                phase = np.exp(-1j * omega_array * t_start)
-                I_c = _I_cos_local(omega_array, Omega, tau)
-                I_s = _I_sin_local(omega_array, Omega, tau)
-                I_e = _I_exp_local(omega_array, tau)
+                phase = np.exp(-1j * _oa * t_start)
+                I_c = _I_cos_local(_oa, Omega, tau)
+                I_s = _I_sin_local(_oa, Omega, tau)
+                I_e = _I_exp_local(_oa, tau)
 
                 Phi += phase * (P_phi * I_c + Q_phi * I_s)
                 Chi += phase * (A_chi * I_e + B_chi * I_c + C_chi * I_s)
@@ -1453,7 +1485,7 @@ def analytic_filter(seq, omega_array, m_y=1.0):
                 G_s = np.conj(rperp_neg) * s_r * np.conj(a0) + (c_r + 1j * rz * s_r) * b0
                 phi_s = np.conj(F_s) * G_s
                 chi_s = np.abs(G_s) ** 2
-                phas = np.exp(-1j * np.outer(omega_array, t0 + ts))
+                phas = np.exp(-1j * np.outer(_oa, t0 + ts))
                 Phi += (phas @ phi_s) * dt
                 Chi += (phas @ chi_s) * dt
                 # Update CK amplitudes via subspace unitary.
@@ -1463,7 +1495,15 @@ def analytic_filter(seq, omega_array, m_y=1.0):
 
             t_start += tau
 
-    Fe = m_y ** 2 * np.abs(Chi) ** 2
+    # After the loop: a = F(T), b = G(T)
+    # H(omega) = Re[F(T)]*Chi(omega) + (G(T)*Phi(omega) + G(T)*.conj()*Phi(-omega)*.conj()) / 2
+    # Split Chi and Phi into +omega and -omega halves.
+    Chi_pos  = Chi[:n_w]      # Chi evaluated at +omega_array
+    Chi_neg  = Chi[n_w:]      # Chi evaluated at -omega_array  (unused but symmetric check)
+    Phi_pos  = Phi[:n_w]      # Phi evaluated at +omega_array
+    Phi_neg  = Phi[n_w:]      # Phi evaluated at -omega_array
+    H = np.real(a) * Chi_pos + 0.5 * (b * Phi_pos + np.conj(b) * np.conj(Phi_neg))
+    Fe = np.abs(H) ** 2
     return omega_array, Fe
 
 

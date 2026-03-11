@@ -135,7 +135,7 @@ class TestQubitKuboSensitivity(unittest.TestCase):
 
 
 class TestSubspaceFilterFunctionBugFixes(unittest.TestCase):
-    """Test that the 3 bugs in SubspaceFilterFunction are fixed."""
+    """Regression checks for the SubspaceFilterFunction implementation."""
 
     def setUp(self):
         self.system = ThreeLevelClock()
@@ -203,12 +203,13 @@ class TestSubspaceFilterFunctionBugFixes(unittest.TestCase):
 
 
 class TestMeasurementSensitivity(unittest.TestCase):
-    """Test SubspaceFilterFunction.measurement_sensitivity() via Fe/Chi.
+    """Test SubspaceFilterFunction.measurement_sensitivity().
 
     The _matches_fft tests cross-validate the polynomial analytic path against
     fft_three_level_filter, which uses a completely independent computation:
     it propagates the full unitary U(t) at each time step, projects to the 2x2
-    subspace to extract f(t) and g(t), samples chi(t)=|g(t)|^2, and FFTs.
+    subspace to extract the sensitivity trajectory, and FFTs the resulting
+    commutator signal.
     """
 
     def setUp(self):
@@ -216,10 +217,10 @@ class TestMeasurementSensitivity(unittest.TestCase):
         self.frequencies = np.linspace(0.5, 30, 200)
 
     def test_ramsey_Fe_matches_fft(self):
-        """Chi-based analytic_filter agrees with fft_three_level_filter (m_y=1).
+        """analytic_filter agrees with fft_three_level_filter for Ramsey.
 
-        Cross-validates the polynomial analytic path (analytic_filter) against
-        the independent unitary propagation + FFT path (fft_three_level_filter).
+        Cross-validates the polynomial analytic path against the independent
+        unitary-propagation + FFT path for the default paper observable.
         """
         from quantum_pulse_suite.core.three_level_filter import analytic_filter
         seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
@@ -271,7 +272,7 @@ class TestMeasurementSensitivity(unittest.TestCase):
         np.testing.assert_allclose(Fe_0, expected, rtol=1e-10)
 
     def test_spin_echo_Fe_matches_fft(self):
-        """Spin echo chi-based analytic_filter agrees with fft_three_level_filter."""
+        """Spin echo analytic_filter agrees with fft_three_level_filter."""
         from quantum_pulse_suite.core.three_level_filter import analytic_filter
         seq = multilevel_spin_echo(self.system, self.system.probe, tau=2.0)
 
@@ -310,10 +311,10 @@ class TestGPSMeasurementDelegation(unittest.TestCase):
         self.frequencies = np.linspace(0.5, 30, 100)
 
     def test_gps_Fe_matches_fft(self):
-        """GPS chi-based analytic_filter agrees with fft_three_level_filter (m_y=1).
+        """GPS analytic_filter agrees with fft_three_level_filter.
 
         GPS uses continuous pulses, so this is a non-trivial cross-check of two
-        independent implementations of F = |Chi|^2.
+        independent implementations of the default-observable filter function.
         """
         from quantum_pulse_suite.core.three_level_filter import analytic_filter
         for n_cyc in [1, 3]:

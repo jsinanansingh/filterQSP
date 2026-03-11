@@ -1,34 +1,43 @@
 """
-Pulse sequence optimizer for equiangular continuous-drive sequences.
+Pulse sequence optimizer for three-level Lambda clock sequences.
 
-Searches for the N-segment equiangular pulse sequence that minimises the
-normalised frequency estimation variance
+Searches for the pulse sequence that optimises a frequency-estimation figure
+of merit built from the DC sensitivity and the off-DC noise variance.
 
     sigma_nu = noise_var / sens_sq
              = [int dw/2pi S(w) F(w)] / F(0)
 
-where the classical noise filter function is F(w) = m_y^2 * |Chi(w)|^2
-(Chi = FT[|G(t)|^2]) and F(0) = sens_sq (signal slope squared).
+where the probe-noise filter function is F(w) = |H(w)|^2 with
+    H(w) = Re[F(T)] * Chi(w) + G(T)/2 * Phi(w) + G(T)*/2 * Phi(-w)*
+(for sequences with G(T)=0, this reduces to F(w) = m_y^2 |Chi(w)|^2).
+F(0) = sens_sq (signal slope squared).
 
-Parameterisation
-----------------
-* N continuous-drive segments of equal duration tau = T / N  (equiangular)
-* Each segment is driven at a shared Rabi frequency Omega with drive axis
-  (cos(phi_k), sin(phi_k), 0) in the xy-plane.
-* Free parameters: Omega > 0 and phases phi_2, ..., phi_N  (phi_1 = 0 by
-  gauge choice, reducing the redundancy from global phase freedom).
+Filter function implementations
+--------------------------------
+* ``analytic_filter``     — closed-form integrals over segment; vectorised over
+                            frequencies.  Used by default in the optimiser for speed.
+* ``fft_three_level_filter`` — direct matrix-multiplication ground-truth check.
+                               Computes U(t), A_e(t) = U†(t)|e><e|U(t),
+                               r(t) = <psi0|[M_I(T), A_e(t)]|psi0>, then FFTs r(t).
+                               Should NOT be used in the optimiser inner loop.
 
-The objective minimised is noise_var / sensitivity_sq  (= sigma_nu).
+Parameterisations supported
+----------------------------
+* Equiangular: N continuous-drive segments of equal duration tau = T/N, with
+  shared Rabi frequency Omega and phases phi_1,...,phi_N.
+* QSP: n instantaneous pulses (fast Rabi frequency omega_fast) with free
+  rotation angles theta_j and phases phi_j, separated by equal free-evolution
+  gaps.
 
 Noise PSDs
 ----------
 * white   : S(omega) = S0  (constant)
 * 1/f     : S(omega) = S0 / |omega|  (1/f noise; integrated from the lowest
-            FFT frequency, well above any 1/f corner expected in practice)
+            frequency 2*pi/T, well above any 1/f corner expected in practice)
 
 Algorithm
 ---------
-1. Global search with scipy differential_evolution over (Omega, phi_2, ..., phi_N).
+1. Global search with scipy differential_evolution.
 2. Local polishing with L-BFGS-B from n_restarts random starts.
 3. Best result across all runs is returned.
 """
@@ -168,6 +177,50 @@ def build_equiangular_3level(
         seq.add_continuous_pulse(omega, [np.cos(phi), np.sin(phi), 0.0], 0.0, tau)
     seq.compute_polynomials()
     return seq
+
+
+def build_ramsey_3level(system, T: float, omega_fast: float) -> MultiLevelPulseSequence:
+    """Build a Ramsey reference sequence with two finite pi/2 pulses."""
+    tau_pi2 = np.pi / (2.0 * omega_fast)
+    tau_free = T - 2.0 * tau_pi2
+    if tau_free <= 0.0:
+        raise ValueError(f"Ramsey reference requires T > pi/omega_fast; got T={T:.4f}")
+    seq = MultiLevelPulseSequence(system, system.probe)
+    seq.add_continuous_pulse(omega_fast, [1.0, 0.0, 0.0], 0.0, tau_pi2)
+    seq.add_free_evolution(tau_free, 0.0)
+    seq.add_continuous_pulse(omega_fast, [1.0, 0.0, 0.0], 0.0, tau_pi2)
+    seq.compute_polynomials()
+    return seq
+
+
+def _objective_from_metrics(
+    sens_sq: float,
+    noise_var: float,
+    objective_mode: str,
+    sens_ref: float,
+    noise_ref: float,
+    objective_weight: float,
+) -> float:
+    """Return a minimisation objective from sequence metrics."""
+    if sens_sq <= 0.0 or not np.isfinite(sens_sq):
+        return 1e10
+    if noise_var < 0.0 or not np.isfinite(noise_var):
+        return 1e10
+
+    if objective_mode == 'sigma_nu':
+        if noise_var <= 0.0:
+            return 1e10
+        return noise_var / sens_sq
+
+    if objective_mode == 'normalized_difference':
+        sens_scale = max(sens_ref, 1e-15)
+        noise_scale = max(noise_ref, 1e-15)
+        score = sens_sq / sens_scale - objective_weight * noise_var / noise_scale
+        return -float(score)
+
+    raise ValueError(
+        f"objective_mode must be 'sigma_nu' or 'normalized_difference'; got {objective_mode!r}"
+    )
 
 
 # =============================================================================
@@ -315,13 +368,17 @@ class PulseOptimizationResult:
     omega : float
         Optimal shared Rabi frequency (rad/s).
     phases : np.ndarray, shape (N,)
-        Optimal drive phases phi_k (rad); phi[0] = 0 by convention.
+        Optimal drive phases phi_k (rad).
     sensitivity_sq : float
         |partial_delta <M>|^2 at the optimum.  Equals F(0).
     noise_var : float
         Classical noise variance: integral F(omega) S(omega) domega / (2 pi).
     sigma_nu : float
         Normalised frequency variance noise_var / sensitivity_sq.
+    objective_score : float
+        Optimiser score for the selected objective convention.
+    objective_mode : str
+        Optimiser objective convention.
     noise_label : str
         Label of the noise PSD used.
     seq : MultiLevelPulseSequence
@@ -334,6 +391,8 @@ class PulseOptimizationResult:
     sigma_nu: float
     noise_label: str
     seq: object
+    objective_score: float = 0.0
+    objective_mode: str = 'sigma_nu'
 
 
 # =============================================================================
@@ -352,7 +411,7 @@ class QSPOptimizationResult:
     thetas : np.ndarray, shape (n,)
         Optimal rotation angles theta_j in (0, 2*pi].
     phis : np.ndarray, shape (n,)
-        Optimal rotation phases phi_j; phi[0] = 0 by convention.
+        Optimal rotation phases phi_j.
     omega_fast : float
         Fixed fast Rabi frequency used for pulses (rad/s).
     tau_free : float
@@ -363,6 +422,10 @@ class QSPOptimizationResult:
         Classical noise variance: integral F(omega) S(omega) domega / (2 pi).
     sigma_nu : float
         Normalised frequency variance noise_var / sensitivity_sq.
+    objective_score : float
+        Optimiser score for the selected objective convention.
+    objective_mode : str
+        Optimiser objective convention.
     noise_label : str
     seq : MultiLevelPulseSequence
     """
@@ -376,6 +439,8 @@ class QSPOptimizationResult:
     sigma_nu: float
     noise_label: str
     seq: object
+    objective_score: float = 0.0
+    objective_mode: str = 'sigma_nu'
 
 
 def build_qsp_3level(
@@ -450,17 +515,31 @@ def optimize_qsp_sequence(
     n_fft: int = 2048,
     pad_factor: int = 4,
     omega_cutoff: Optional[float] = None,
+    objective_mode: str = 'normalized_difference',
+    objective_weight: float = 1.0,
     popsize: int = 15,
     tol: float = 1e-5,
     maxiter: int = 300,
+    use_analytic: bool = True,
+    n_omega: int = 512,
+    omega_max_analytic: float = 50.0,
 ) -> QSPOptimizationResult:
     """
     Optimise an n-pulse QSP sequence on the three-level Lambda clock.
 
-    Free parameters: theta_1 ... theta_n in (0, pi],  phi_2 ... phi_n in [0, 2*pi).
-    phi_1 = 0 by gauge choice.  The upper bound theta <= pi restricts each
+    Free parameters: theta_1 ... theta_n in (0, pi],  phi_1 ... phi_n in [0, 2*pi).
+    The upper bound theta <= pi restricts each
     pulse to at most a pi-rotation (standard QSP convention); the optimiser
     can find any rotation in (0, pi] on each pulse.
+
+    use_analytic : bool
+        If True (default), use analytic_filter for the noise integral in the
+        objective.  Substantially faster than the FFT path for sequences with
+        many short pulses.
+    n_omega : int
+        Quadrature nodes for the analytic integral (default 512).
+    omega_max_analytic : float
+        Upper frequency limit for the analytic integral (default 50.0 rad/s).
 
     Returns
     -------
@@ -477,16 +556,29 @@ def optimize_qsp_sequence(
         S_func = noise_psd
         noise_label = 'custom'
 
-    # Parameter layout: x = [theta_1,...,theta_n, phi_2,...,phi_n]  (2n-1 params)
+    ref_seq = build_ramsey_3level(system, T, omega_fast)
+    _omega_lo = resolve_omega_cutoff(T, omega_cutoff)
+    if use_analytic:
+        _ana_freqs = np.linspace(_omega_lo, omega_max_analytic, n_omega)
+        sens_ref, noise_ref, sigma_ref = analytic_evaluate_sequence(
+            ref_seq, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_omega=n_omega, omega_max=omega_max_analytic,
+            omega_cutoff=omega_cutoff)
+    else:
+        sens_ref, noise_ref, sigma_ref = evaluate_sequence(
+            ref_seq, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_fft=n_fft, pad_factor=pad_factor, omega_cutoff=omega_cutoff)
+
+    # Parameter layout: x = [theta_1,...,theta_n, phi_1,...,phi_n]  (2n params)
     theta_lo  = 0.01
     theta_hi  = np.pi          # at most a pi-pulse per element
     phi_lo    = 0.0
     phi_hi    = 2.0 * np.pi
-    bounds = [(theta_lo, theta_hi)] * n + [(phi_lo, phi_hi)] * (n - 1)
+    bounds = [(theta_lo, theta_hi)] * n + [(phi_lo, phi_hi)] * n
 
     def unpack(x):
         thetas = x[:n]
-        phis   = np.concatenate([[0.0], x[n:]])
+        phis   = x[n:]
         return thetas, phis
 
     def objective(x):
@@ -499,16 +591,21 @@ def optimize_qsp_sequence(
             _, sens_sq = detuning_sensitivity(seq, M=M, psi0=psi0)
             if sens_sq < 1e-20:
                 return 1e10
-            freqs, Fe, _, _ = fft_three_level_filter(
-                seq, n_samples=n_fft, pad_factor=pad_factor, m_y=m_y)
-            omega_lo = resolve_omega_cutoff(T, omega_cutoff)
-            mask = freqs >= omega_lo
-            if np.count_nonzero(mask) < 2:
-                return 1e10
-            noise_var = float(simpson(Fe[mask] * S_func(freqs[mask]), x=freqs[mask]) / (2.0 * np.pi))
-            if noise_var < 1e-30:
-                return 1e10
-            return noise_var / sens_sq
+            if use_analytic:
+                if _omega_lo >= omega_max_analytic:
+                    return 1e10
+                _, Fe = analytic_filter(seq, _ana_freqs, m_y=m_y)
+                noise_var = float(simpson(Fe * S_func(_ana_freqs), x=_ana_freqs) / (2.0 * np.pi))
+            else:
+                freqs, Fe, _, _ = fft_three_level_filter(
+                    seq, n_samples=n_fft, pad_factor=pad_factor, m_y=m_y)
+                mask = freqs >= _omega_lo
+                if np.count_nonzero(mask) < 2:
+                    return 1e10
+                noise_var = float(simpson(Fe[mask] * S_func(freqs[mask]), x=freqs[mask]) / (2.0 * np.pi))
+            return _objective_from_metrics(
+                sens_sq, noise_var, objective_mode,
+                sens_ref, noise_ref, objective_weight)
         except Exception:
             return 1e10
 
@@ -526,7 +623,7 @@ def optimize_qsp_sequence(
     for _ in range(n_restarts):
         x0 = np.concatenate([
             rng.uniform(theta_lo, theta_hi, n),
-            rng.uniform(phi_lo,   phi_hi,   n - 1),
+            rng.uniform(phi_lo,   phi_hi,   n),
         ])
         res = minimize(
             objective, x0,
@@ -540,9 +637,22 @@ def optimize_qsp_sequence(
     thetas_opt, phis_opt = unpack(best_x)
     seq_opt  = build_qsp_3level(system, T, n, thetas_opt, phis_opt, omega_fast)
     tau_free = (T - float(np.sum(thetas_opt)) / omega_fast) / max(n - 1, 1)
-    sens_sq, noise_var, sigma_nu = evaluate_sequence(
-        seq_opt, S_func, m_y=m_y, M=M, psi0=psi0,
-        n_fft=n_fft, pad_factor=pad_factor, omega_cutoff=omega_cutoff)
+    if use_analytic:
+        sens_sq, noise_var, sigma_nu = analytic_evaluate_sequence(
+            seq_opt, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_omega=n_omega, omega_max=omega_max_analytic,
+            omega_cutoff=omega_cutoff)
+    else:
+        sens_sq, noise_var, sigma_nu = evaluate_sequence(
+            seq_opt, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_fft=n_fft, pad_factor=pad_factor, omega_cutoff=omega_cutoff)
+    objective_score = (
+        -_objective_from_metrics(
+            sens_sq, noise_var, objective_mode,
+            sens_ref, noise_ref, objective_weight)
+        if objective_mode == 'normalized_difference'
+        else sigma_nu
+    )
 
     return QSPOptimizationResult(
         n=n,
@@ -553,6 +663,8 @@ def optimize_qsp_sequence(
         sensitivity_sq=sens_sq,
         noise_var=noise_var,
         sigma_nu=sigma_nu,
+        objective_score=objective_score,
+        objective_mode=objective_mode,
         noise_label=noise_label,
         seq=seq_opt,
     )
@@ -583,6 +695,8 @@ def optimize_equiangular_sequence(
     n_omega: int = 512,
     omega_max_analytic: float = 50.0,
     omega_cutoff: Optional[float] = None,
+    objective_mode: str = 'normalized_difference',
+    objective_weight: float = 1.0,
 ) -> PulseOptimizationResult:
     """
     Optimise an equiangular continuous-drive 3-level clock sequence.
@@ -590,7 +704,7 @@ def optimize_equiangular_sequence(
     Minimises the frequency estimation variance
         sigma^2_freq = Kubo_variance(S) / |partial_delta <M>|^2
     over N equal-duration continuous-drive segments, parametrised by a
-    shared Rabi frequency Omega and N-1 free drive phases (phi_1 = 0).
+    shared Rabi frequency Omega and N free drive phases.
 
     Parameters
     ----------
@@ -665,6 +779,18 @@ def optimize_equiangular_sequence(
     if use_analytic:
         _ana_freqs = np.linspace(_omega_lo, omega_max_analytic, n_omega)
 
+    ref_seq = build_ramsey_3level(system, T, max(omega_fixed or (N * np.pi / T), np.pi / T))
+    if use_analytic:
+        sens_ref, noise_ref, sigma_ref = analytic_evaluate_sequence(
+            ref_seq, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_omega=n_omega, omega_max=omega_max_analytic,
+            omega_cutoff=omega_cutoff)
+    else:
+        sens_ref, noise_ref, sigma_ref = evaluate_sequence(
+            ref_seq, S_func, m_y=m_y, M=M, psi0=psi0,
+            n_fft=n_fft, pad_factor=pad_factor,
+            omega_cutoff=omega_cutoff)
+
     def _kubo(seq):
         """Compute noise variance from omega_lo = 2*pi/T to omega_max."""
         if use_analytic:
@@ -682,29 +808,26 @@ def optimize_equiangular_sequence(
 
     if omega_fixed is not None:
         # ── Phase-only optimisation at fixed Omega ────────────────────────────
-        # x = [phi_2, ..., phi_N]  (N-1 free phases; phi_1 = 0 fixed)
-        phase_bounds = [(0.0, 2.0 * np.pi)] * (N - 1)
+        # x = [phi_1, ..., phi_N]
+        phase_bounds = [(0.0, 2.0 * np.pi)] * N
 
         def unpack_phases(x):
-            phases = np.concatenate([[0.0], x])
-            return omega_fixed, phases
+            return omega_fixed, np.asarray(x, dtype=float)
 
         def objective_phases(x):
             omega, phases = unpack_phases(x)
             try:
                 seq = build_equiangular_3level(system, T, N, omega, phases)
                 _, sens_sq = detuning_sensitivity(seq, M=M, psi0=psi0)
-                if sens_sq < 1.0:
-                    return 1e10
                 kubo_var = _kubo(seq)
-                if kubo_var < 1e-30:
-                    return 1e10
-                return kubo_var / sens_sq
+                return _objective_from_metrics(
+                    sens_sq, kubo_var, objective_mode,
+                    sens_ref, noise_ref, objective_weight)
             except Exception:
                 return 1e10
 
         if N == 1:
-            # No free phases: single segment at fixed omega, evaluate directly.
+            # Single segment at fixed omega: optimise the lone phase directly.
             best_phases = np.array([0.0])
             best_omega  = omega_fixed
         else:
@@ -722,7 +845,7 @@ def optimize_equiangular_sequence(
             best_val   = de_result.fun
 
             for _ in range(n_restarts):
-                x0 = rng.uniform(0.0, 2.0 * np.pi, N - 1)
+                x0 = rng.uniform(0.0, 2.0 * np.pi, N)
                 res = minimize(
                     objective_phases, x0,
                     method='L-BFGS-B',
@@ -752,6 +875,14 @@ def optimize_equiangular_sequence(
             sensitivity_sq=sens_sq,
             noise_var=noise_var,
             sigma_nu=sigma_nu,
+            objective_score=(
+                -_objective_from_metrics(
+                    sens_sq, noise_var, objective_mode,
+                    sens_ref, noise_ref, objective_weight)
+                if objective_mode == 'normalized_difference'
+                else sigma_nu
+            ),
+            objective_mode=objective_mode,
             noise_label=noise_label,
             seq=seq_opt,
         )
@@ -760,17 +891,16 @@ def optimize_equiangular_sequence(
     if omega_max is None:
         omega_max = N * np.pi / T   # maximum: one pi-pulse per segment
 
-    # Parameter layout: x = [omega, phi_2, ..., phi_N]   (N free params total)
-    # phi_1 = 0 is fixed to break the global-phase gauge redundancy.
+    # Parameter layout: x = [omega, phi_1, ..., phi_N]   (N+1 params total)
     omega_lo = np.pi / (10.0 * T)    # avoid Omega -> 0 (trivial identity)
     bounds = (
         [(omega_lo, omega_max)]        # omega
-        + [(0.0, 2.0 * np.pi)] * (N - 1)  # phi_2 ... phi_N
+        + [(0.0, 2.0 * np.pi)] * N
     )
 
     def unpack(x):
         omega  = float(x[0])
-        phases = np.concatenate([[0.0], x[1:]])   # prepend phi_1 = 0
+        phases = np.asarray(x[1:], dtype=float)
         return omega, phases
 
     def objective(x):
@@ -778,12 +908,10 @@ def optimize_equiangular_sequence(
         try:
             seq = build_equiangular_3level(system, T, N, omega, phases)
             _, sens_sq = detuning_sensitivity(seq, M=M, psi0=psi0)
-            if sens_sq < 1e-20:
-                return 1e10
             kubo_var = _kubo(seq)
-            if kubo_var < 1e-30:
-                return 1e10
-            return kubo_var / sens_sq
+            return _objective_from_metrics(
+                sens_sq, kubo_var, objective_mode,
+                sens_ref, noise_ref, objective_weight)
         except Exception:
             return 1e10
 
@@ -805,7 +933,7 @@ def optimize_equiangular_sequence(
     for _ in range(n_restarts):
         x0 = np.array(
             [rng.uniform(omega_lo, omega_max)]
-            + list(rng.uniform(0.0, 2.0 * np.pi, N - 1))
+            + list(rng.uniform(0.0, 2.0 * np.pi, N))
         )
         res = minimize(
             objective, x0,
@@ -837,6 +965,14 @@ def optimize_equiangular_sequence(
         sensitivity_sq=sens_sq,
         noise_var=noise_var,
         sigma_nu=sigma_nu,
+        objective_score=(
+            -_objective_from_metrics(
+                sens_sq, noise_var, objective_mode,
+                sens_ref, noise_ref, objective_weight)
+            if objective_mode == 'normalized_difference'
+            else sigma_nu
+        ),
+        objective_mode=objective_mode,
         noise_label=noise_label,
         seq=seq_opt,
     )

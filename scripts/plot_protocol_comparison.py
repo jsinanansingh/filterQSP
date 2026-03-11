@@ -20,7 +20,7 @@ NOTE on GPS sensitivity at delta=0 (H = delta*|e><e| convention):
     identical to Ramsey.  The protocols differ only through their filter
     functions (and hence their Kubo variances).
 
-Equiangular phases are loaded from the newest timestamped
+Equiangular phases are loaded exclusively from the newest timestamped
 equiangular_opt_cache_*.npz file (white-noise optimised).
 """
 
@@ -43,7 +43,6 @@ from quantum_pulse_suite.core.three_level_filter import (
     detuning_sensitivity,
 )
 from quantum_pulse_suite.analysis.pulse_optimizer import (
-    optimize_equiangular_sequence,
     white_noise_psd,
     one_over_f_psd,
 )
@@ -88,6 +87,14 @@ def find_latest_equiangular_cache():
     if legacy.exists():
         return legacy
     return None
+
+
+def load_cached_equiangular_result(system, cache, N):
+    """Rebuild cached white-noise equiangular result for a given N."""
+    omega = float(cache[f'eq_N{N}_white_omega'])
+    phases = np.asarray(cache[f'eq_N{N}_white_phases'], dtype=float)
+    seq = build_equiangular(system, omega, phases)
+    return omega, phases, seq
 
 
 # =============================================================================
@@ -165,6 +172,13 @@ def evaluate(seq, label=''):
     return sens_sq, noise_w, snu_w, noise_f, snu_f, freqs, Fe
 
 
+def objective_score(sens_sq, noise_var, sens_ref, noise_ref, weight=1.0):
+    """Ramsey-normalized post-hoc optimizer score."""
+    if sens_ref <= 0.0 or noise_ref <= 0.0:
+        return 0.0
+    return sens_sq / sens_ref - weight * noise_var / noise_ref
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -183,20 +197,6 @@ def main():
     print('Building GPS m=8 (delta=0, resonant quadrature) ...')
     seq_gps8 = build_gps_at_zero(system, OMEGA_GPS8, DELTA_GPS8)
 
-    print('Optimising equiangular N=4 (white noise) ...')
-    result_eq4 = optimize_equiangular_sequence(
-        system, T, N=4, noise_psd='white',
-        omega_max=8.0 * np.pi / T,   # allow OmegaT up to 8*pi per segment
-        n_restarts=15, seed=7, popsize=20, maxiter=600,
-    )
-    omega_eq4  = result_eq4.omega
-    phases_eq4 = result_eq4.phases
-    seq_eq4    = result_eq4.seq
-    print(f'  Omega = {omega_eq4:.6f}  (Omega*T = {omega_eq4 * T:.5f})')
-    print(f'  phases = {np.array2string(phases_eq4, precision=4, separator=", ")}')
-
-    # Load N=8 and N=16 from pre-computed cache (white-noise optimised phases)
-    print('Loading equiangular N=8, N=16 from cache ...')
     cache_path = find_latest_equiangular_cache()
     if cache_path is None:
         raise FileNotFoundError(
@@ -204,16 +204,15 @@ def main():
             'Run scripts/run_equiangular_optimization.py first.'
         )
     _cache = np.load(str(cache_path), allow_pickle=True)
-    print(f'  using cache: {cache_path}')
+    print(f'Loading equiangular N=4, N=8, N=16 from cache: {cache_path}')
 
-    omega_eq8  = float(_cache['eq_N8_white_omega'])
-    phases_eq8 = _cache['eq_N8_white_phases']
-    seq_eq8    = build_equiangular(system, omega_eq8, phases_eq8)
+    omega_eq4, phases_eq4, seq_eq4 = load_cached_equiangular_result(system, _cache, 4)
+    print(f'  N=4:  Omega*T = {omega_eq4 * T:.5f}')
+
+    omega_eq8, phases_eq8, seq_eq8 = load_cached_equiangular_result(system, _cache, 8)
     print(f'  N=8:  Omega*T = {omega_eq8 * T:.5f}')
 
-    omega_eq16  = float(_cache['eq_N16_white_omega'])
-    phases_eq16 = _cache['eq_N16_white_phases']
-    seq_eq16    = build_equiangular(system, omega_eq16, phases_eq16)
+    omega_eq16, phases_eq16, seq_eq16 = load_cached_equiangular_result(system, _cache, 16)
     print(f'  N=16: Omega*T = {omega_eq16 * T:.5f}')
 
     # ── Evaluate all protocols ────────────────────────────────────────────────
@@ -238,8 +237,20 @@ def main():
         ('Equiangular N=8',       *res_E8[:5]),
         ('Equiangular N=16',      *res_E16[:5]),
     ]
+    sens_ref = res_R[0]
+    noise_w_ref = res_R[1]
+    noise_f_ref = res_R[3]
     for lbl, s, nw, sw, nf, sf in rows:
         print(f'{lbl:<36} {s:>9.4f} {nw:>11.3e} {sw:>11.3e} {sf:>11.3e}')
+
+    print()
+    hdr2 = f'{"Protocol":<36} {"score_w":>11} {"score_1/f":>11}'
+    print(hdr2)
+    print('-' * len(hdr2))
+    for lbl, s, nw, sw, nf, sf in rows:
+        sc_w = objective_score(s, nw, sens_ref, noise_w_ref)
+        sc_f = objective_score(s, nf, sens_ref, noise_f_ref)
+        print(f'{lbl:<36} {sc_w:>11.3f} {sc_f:>11.3f}')
 
     # ── Filter function plot ──────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
@@ -291,6 +302,12 @@ def main():
         'omega_eq4':  omega_eq4,
         'phases_eq4': phases_eq4,
         'rows':       rows,
+        'score_rows': [
+            (lbl,
+             objective_score(s, nw, sens_ref, noise_w_ref),
+             objective_score(s, nf, sens_ref, noise_f_ref))
+            for lbl, s, nw, sw, nf, sf in rows
+        ],
     }
 
 

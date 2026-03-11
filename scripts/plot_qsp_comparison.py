@@ -94,6 +94,8 @@ def save_opt_cache(res_eq4, qsp_results):
         'eq4_sensitivity_sq': np.array(res_eq4.sensitivity_sq),
         'eq4_noise_var':      np.array(res_eq4.noise_var),
         'eq4_sigma_nu':       np.array(res_eq4.sigma_nu),
+        'eq4_objective_score': np.array(res_eq4.objective_score),
+        'eq4_objective_mode':  np.array(res_eq4.objective_mode),
     }
     for n, noise_dict in qsp_results.items():
         for nlabel, r in noise_dict.items():
@@ -105,6 +107,8 @@ def save_opt_cache(res_eq4, qsp_results):
             d[f'{k}_sensitivity_sq'] = np.array(r.sensitivity_sq)
             d[f'{k}_noise_var']      = np.array(r.noise_var)
             d[f'{k}_sigma_nu']       = np.array(r.sigma_nu)
+            d[f'{k}_objective_score'] = np.array(r.objective_score)
+            d[f'{k}_objective_mode']  = np.array(r.objective_mode)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = _cache_path_for_timestamp()
     np.savez(str(cache_path), **d)
@@ -140,6 +144,8 @@ def load_opt_cache(system, noise_labels, qsp_ns):
         sensitivity_sq=float(c['eq4_sensitivity_sq']),
         noise_var=float(c['eq4_noise_var']),
         sigma_nu=float(c['eq4_sigma_nu']),
+        objective_score=float(c['eq4_objective_score']) if 'eq4_objective_score' in c else float(c['eq4_sigma_nu']),
+        objective_mode=c['eq4_objective_mode'].item() if 'eq4_objective_mode' in c else 'sigma_nu',
         noise_label='white', seq=seq_eq4,
     )
 
@@ -159,6 +165,8 @@ def load_opt_cache(system, noise_labels, qsp_ns):
                 sensitivity_sq=float(c[f'{k}_sensitivity_sq']),
                 noise_var=float(c[f'{k}_noise_var']),
                 sigma_nu=float(c[f'{k}_sigma_nu']),
+                objective_score=float(c[f'{k}_objective_score']) if f'{k}_objective_score' in c else float(c[f'{k}_sigma_nu']),
+                objective_mode=c[f'{k}_objective_mode'].item() if f'{k}_objective_mode' in c else 'sigma_nu',
                 noise_label=nlabel, seq=seq,
             )
 
@@ -205,6 +213,22 @@ def sigma_nu_under(ss, fr, Fe, S_func):
     return noise_var / ss if (ss > 0 and noise_var > 0) else 0.0
 
 
+def noise_var_under(fr, Fe, S_func):
+    """Return band-limited noise variance for the supplied PSD."""
+    mask = fr >= OMEGA_CUTOFF
+    if np.count_nonzero(mask) < 2:
+        return 0.0
+    return float(simpson(Fe[mask] * S_func(fr[mask]), x=fr[mask]) / (2 * np.pi))
+
+
+def objective_score_under(ss, fr, Fe, S_func, ss_ref, noise_ref, weight=1.0):
+    """Return Ramsey-normalized difference score for a protocol under one PSD."""
+    noise_var = noise_var_under(fr, Fe, S_func)
+    if ss_ref <= 0.0 or noise_ref <= 0.0:
+        return 0.0
+    return ss / ss_ref - weight * noise_var / noise_ref
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -238,12 +262,13 @@ def main():
         )
     res_eq4, qsp_results = cached
     print(f'  Equiangular: Omega*T={res_eq4.omega*T:.4f}  '
-          f'phases={np.array2string(res_eq4.phases, precision=3)}')
+          f'phases={np.array2string(res_eq4.phases, precision=3)}  '
+          f'opt_score={res_eq4.objective_score:.3f}')
     for n in qsp_ns:
         for nlabel in noise_labels:
             r = qsp_results[n][nlabel]
             print(f'  QSP n={n}, {nlabel}: tau_free={r.tau_free:.4f}  '
-                  f'sigma_nu={r.sigma_nu:.3f}')
+                  f'opt_score={r.objective_score:.3f}  sigma_nu={r.sigma_nu:.3f}')
 
     seq_eq4 = res_eq4.seq
 
@@ -277,6 +302,31 @@ def main():
             ss, fr, Fe = get_filter_fft(r.seq)
             row_foms.append(sigma_nu_under(ss, fr, Fe, S_func))
         print(f'{label:<22}' + ''.join(f' {f:>22.3f}' for f in row_foms))
+
+    print('\n--- post-hoc objective-score table ---')
+    print(hdr)
+    print('-' * len(hdr))
+    ref_norms = {}
+    ss_ref, fr_ref, Fe_ref = ref_data_fft['Ramsey']
+    for S_func, nlabel in zip(S_funcs, noise_labels):
+        ref_norms[nlabel] = (ss_ref, noise_var_under(fr_ref, Fe_ref, S_func))
+
+    for lbl, seq, _, _ in refs:
+        ss, fr, Fe = ref_data_fft[lbl]
+        scores = [
+            objective_score_under(ss, fr, Fe, S_func, *ref_norms[nlabel])
+            for S_func, nlabel in zip(S_funcs, noise_labels)
+        ]
+        print(f'{lbl:<22}' + ''.join(f' {s:>22.3f}' for s in scores))
+
+    for n in qsp_ns:
+        label = f'QSP n={n}'
+        row_scores = []
+        for S_func, nlabel in zip(S_funcs, noise_labels):
+            r = qsp_results[n][nlabel]
+            ss, fr, Fe = get_filter_fft(r.seq)
+            row_scores.append(objective_score_under(ss, fr, Fe, S_func, *ref_norms[nlabel]))
+        print(f'{label:<22}' + ''.join(f' {s:>22.3f}' for s in row_scores))
 
     # ── Filter function plots ─────────────────────────────────────────────────
     # One figure per noise model: filter functions of all protocols at the
@@ -329,15 +379,18 @@ def main():
         + [f'QSP n={n}' for n in qsp_ns]
     )
     all_seqs_by_noise = {nlabel: [] for nlabel in noise_labels}
+    all_scores_by_noise = {nlabel: [] for nlabel in noise_labels}
 
     for nlabel, S_func in zip(noise_labels, S_funcs):
         for lbl, seq, _, _ in refs:
             ss, fr, Fe = ref_data_fft[lbl]
             all_seqs_by_noise[nlabel].append(sigma_nu_under(ss, fr, Fe, S_func))
+            all_scores_by_noise[nlabel].append(objective_score_under(ss, fr, Fe, S_func, *ref_norms[nlabel]))
         for n in qsp_ns:
             r = qsp_results[n][nlabel]
             ss, fr, Fe = get_filter_fft(r.seq)
             all_seqs_by_noise[nlabel].append(sigma_nu_under(ss, fr, Fe, S_func))
+            all_scores_by_noise[nlabel].append(objective_score_under(ss, fr, Fe, S_func, *ref_norms[nlabel]))
 
     x   = np.arange(len(all_labels))
     w   = 0.25
@@ -362,6 +415,27 @@ def main():
         fig2.savefig(OUTPUT_DIR / f'qsp_fom_bars.{ext}',
                      dpi=300, bbox_inches='tight')
     print('Saved qsp_fom_bars')
+
+    fig3, ax3 = plt.subplots(figsize=(11, 5), constrained_layout=True)
+    for i, (nlabel, color) in enumerate(zip(noise_labels, colors_bar)):
+        ax3.bar(x + (i - 1) * w, all_scores_by_noise[nlabel], w,
+                label=nlabel, color=color, alpha=0.85)
+
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(all_labels, rotation=15, ha='right', fontsize=9)
+    ax3.set_ylabel('Objective score', fontsize=11)
+    ax3.set_title(
+        'Post-hoc objective-score comparison: QSP vs GPS vs equiangular'
+        '\n'
+        'Score = sens/sens_Ramsey - noise/noise_Ramsey for each noise model',
+        fontsize=11)
+    ax3.legend(fontsize=9)
+    ax3.grid(True, axis='y', alpha=0.3)
+
+    for ext in ['pdf', 'png']:
+        fig3.savefig(OUTPUT_DIR / f'qsp_objective_bars.{ext}',
+                     dpi=300, bbox_inches='tight')
+    print('Saved qsp_objective_bars')
 
     plt.close('all')
 
