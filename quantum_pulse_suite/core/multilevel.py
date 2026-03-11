@@ -682,32 +682,70 @@ class SubspaceFilterFunction(FilterFunction):
 
         return Phi
 
+    def _compute_chi(self, frequencies: np.ndarray) -> np.ndarray:
+        """
+        Compute Chi(w) = sum_j int |G_j(t)|^2 e^{-iwt} dt.
+
+        This is the clock-channel spectral quantity used by the updated
+        three-level variance filter function for the default sigma_y clock
+        measurement.
+        """
+        from .three_level_filter import _exp_integral, _add_continuous_segment_chi
+
+        frequencies = np.asarray(frequencies, dtype=float)
+        Chi = np.zeros(len(frequencies), dtype=complex)
+
+        if self._polynomial_segments is None:
+            return Chi
+
+        for seg_idx, (F_func, G_func, t_start, t_end) in enumerate(
+                self._polynomial_segments):
+            tau = t_end - t_start
+            if tau < 1e-15:
+                continue
+
+            poly_entry = self._poly_list[seg_idx]
+
+            if len(poly_entry) == 5:
+                g_prev = poly_entry[1]
+                g2 = abs(g_prev) ** 2
+                if g2 < 1e-15:
+                    continue
+                Chi += g2 * _exp_integral(frequencies, t_start, t_end)
+
+            elif len(poly_entry) == 7:
+                _add_continuous_segment_chi(Chi, G_func, t_start, t_end, frequencies)
+
+        return Chi
+
     def measurement_sensitivity(self, frequencies: np.ndarray,
-                                m_z: float) -> np.ndarray:
+                                m_y: float = 1.0) -> np.ndarray:
         """
         Compute the e-noise filter function Fe(w) for a clock measurement.
 
-        Uses the three-level decomposition:
-            Fe(w) = 1/2 * ((1 - m_z^2) + 2*m_z) * |Phi(w)|^2
+        In the updated three-level clock model with the observable taken in the
+        interaction frame of the control sequence, the classical e-noise
+        variance filter is
 
-        where m_z is the z-component of the measurement direction on the
-        clock ({|g>, |f>}) Bloch sphere. For sigma_y measurement m_z=0,
-        for sigma_z measurement m_z=1.
+            Fe(w) = m_y^2 * |Chi(w)|^2
+
+        where Chi(w) = FT[|G(t)|^2] and m_y is the sigma_y^{gm} weight of the
+        clock observable.
 
         Parameters
         ----------
         frequencies : np.ndarray
             Angular frequencies.
-        m_z : float
-            z-component of measurement direction.
+        m_y : float
+            y-component of measurement direction.
 
         Returns
         -------
         np.ndarray
             Fe(w) at each frequency.
         """
-        Phi = self._compute_phi(frequencies)
-        return 0.5 * ((1 - m_z**2) + 2 * m_z) * np.abs(Phi)**2
+        Chi = self._compute_chi(frequencies)
+        return m_y**2 * np.abs(Chi)**2
 
 
 # =============================================================================

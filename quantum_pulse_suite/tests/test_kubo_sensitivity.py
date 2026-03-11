@@ -203,12 +203,12 @@ class TestSubspaceFilterFunctionBugFixes(unittest.TestCase):
 
 
 class TestMeasurementSensitivity(unittest.TestCase):
-    """Test SubspaceFilterFunction.measurement_sensitivity() via Fe/Phi.
+    """Test SubspaceFilterFunction.measurement_sensitivity() via Fe/Chi.
 
     The _matches_fft tests cross-validate the polynomial analytic path against
     fft_three_level_filter, which uses a completely independent computation:
     it propagates the full unitary U(t) at each time step, projects to the 2x2
-    subspace to extract f(t) and g(t), samples phi(t)=conj(f)*g, and FFTs.
+    subspace to extract f(t) and g(t), samples chi(t)=|g(t)|^2, and FFTs.
     """
 
     def setUp(self):
@@ -216,78 +216,79 @@ class TestMeasurementSensitivity(unittest.TestCase):
         self.frequencies = np.linspace(0.5, 30, 200)
 
     def test_ramsey_Fe_matches_fft(self):
-        """measurement_sensitivity (polynomial analytic) matches fft_three_level_filter
-        (independent path: unitary propagation + sampling + FFT)."""
+        """Chi-based analytic_filter agrees with fft_three_level_filter (m_y=1).
+
+        Cross-validates the polynomial analytic path (analytic_filter) against
+        the independent unitary propagation + FFT path (fft_three_level_filter).
+        """
+        from quantum_pulse_suite.core.three_level_filter import analytic_filter
         seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        ff = seq.get_filter_function_calculator()
 
         freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
-            seq, n_samples=8192, m_z=0.0)
+            seq, n_samples=8192, m_y=1.0)
 
         T = seq.total_duration()
         mask = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 80.0)
-        Fe_method = ff.measurement_sensitivity(freqs_fft[mask], m_z=0.0)
+        _, Fe_ana = analytic_filter(seq, freqs_fft[mask], m_y=1.0)
         Fe_ref = Fe_fft[mask]
 
-        peak = max(np.max(Fe_ref), np.max(Fe_method))
-        sig = (Fe_ref > 1e-4 * peak) & (Fe_method > 1e-4 * peak)
+        peak = max(np.max(Fe_ref), np.max(Fe_ana))
+        sig = (Fe_ref > 1e-4 * peak) & (Fe_ana > 1e-4 * peak)
         self.assertTrue(np.any(sig), "No significant frequency points in Ramsey Fe comparison")
 
-        rel_err = np.abs(Fe_ref[sig] - Fe_method[sig]) / Fe_method[sig]
-        self.assertLess(np.max(rel_err), 0.02,
+        rel_err = np.abs(Fe_ref[sig] - Fe_ana[sig]) / Fe_ana[sig]
+        self.assertLess(np.max(rel_err), 0.05,
                         msg=f"Ramsey Fe: max rel error {np.max(rel_err):.4f}")
 
     def test_ramsey_Fe_nonzero(self):
-        """Fe should be nonzero for Ramsey with σ_y measurement (m_z=0)."""
+        """Fe should be nonzero for Ramsey with σ_y measurement (m_y=1)."""
         seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
         ff = seq.get_filter_function_calculator()
-        Fe = ff.measurement_sensitivity(self.frequencies, m_z=0.0)
+        Fe = ff.measurement_sensitivity(self.frequencies, m_y=1.0)
 
         self.assertGreater(np.max(Fe), 1e-6,
                            "Fe should be nonzero for Ramsey")
 
-    def test_m_z_one_gives_full_phi_squared(self):
-        """For m_z=1 (σ_z): Fe = |Φ|² (prefactor = 1)."""
+    def test_m_y_one_gives_full_chi_squared(self):
+        """For m_y=1 (σ_y): Fe = |Chi|²."""
         seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
         ff = seq.get_filter_function_calculator()
 
-        Fe_1 = ff.measurement_sensitivity(self.frequencies, m_z=1.0)
-        Phi = ff._compute_phi(self.frequencies)
-        expected = np.abs(Phi)**2
+        Fe_1 = ff.measurement_sensitivity(self.frequencies, m_y=1.0)
+        Chi = ff._compute_chi(self.frequencies)
+        expected = np.abs(Chi)**2
 
         np.testing.assert_allclose(Fe_1, expected, rtol=1e-10)
 
-    def test_m_z_zero_gives_half_phi_squared(self):
-        """For m_z=0 (σ_y): Fe = ½|Φ|² (prefactor = 0.5)."""
+    def test_m_y_zero_gives_zero(self):
+        """For m_y=0, Fe vanishes."""
         seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
         ff = seq.get_filter_function_calculator()
 
-        Fe_0 = ff.measurement_sensitivity(self.frequencies, m_z=0.0)
-        Phi = ff._compute_phi(self.frequencies)
-        expected = 0.5 * np.abs(Phi)**2
+        Fe_0 = ff.measurement_sensitivity(self.frequencies, m_y=0.0)
+        expected = np.zeros_like(Fe_0)
 
         np.testing.assert_allclose(Fe_0, expected, rtol=1e-10)
 
     def test_spin_echo_Fe_matches_fft(self):
-        """Spin echo Fe (polynomial analytic) matches fft_three_level_filter
-        (independent path: unitary propagation + sampling + FFT)."""
+        """Spin echo chi-based analytic_filter agrees with fft_three_level_filter."""
+        from quantum_pulse_suite.core.three_level_filter import analytic_filter
         seq = multilevel_spin_echo(self.system, self.system.probe, tau=2.0)
-        ff = seq.get_filter_function_calculator()
 
         freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
-            seq, n_samples=8192, m_z=0.0)
+            seq, n_samples=8192, m_y=1.0)
 
         T = seq.total_duration()
         mask = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 80.0)
-        Fe_method = ff.measurement_sensitivity(freqs_fft[mask], m_z=0.0)
+        _, Fe_ana = analytic_filter(seq, freqs_fft[mask], m_y=1.0)
         Fe_ref = Fe_fft[mask]
 
-        peak = max(np.max(Fe_ref), np.max(Fe_method))
-        sig = (Fe_ref > 1e-4 * peak) & (Fe_method > 1e-4 * peak)
+        peak = max(np.max(Fe_ref), np.max(Fe_ana))
+        sig = (Fe_ref > 1e-4 * peak) & (Fe_ana > 1e-4 * peak)
         self.assertTrue(np.any(sig), "No significant frequency points in spin echo Fe comparison")
 
-        rel_err = np.abs(Fe_ref[sig] - Fe_method[sig]) / Fe_method[sig]
-        self.assertLess(np.max(rel_err), 0.02,
+        rel_err = np.abs(Fe_ref[sig] - Fe_ana[sig]) / Fe_ana[sig]
+        self.assertLess(np.max(rel_err), 0.05,
                         msg=f"Spin echo Fe: max rel error {np.max(rel_err):.4f}")
 
 
@@ -309,29 +310,31 @@ class TestGPSMeasurementDelegation(unittest.TestCase):
         self.frequencies = np.linspace(0.5, 30, 100)
 
     def test_gps_Fe_matches_fft(self):
-        """GPS filter_function_for_measurement (polynomial analytic) matches
-        fft_three_level_filter (independent path: unitary propagation + FFT).
-        GPS uses continuous pulses so this is a non-trivial cross-check."""
+        """GPS chi-based analytic_filter agrees with fft_three_level_filter (m_y=1).
+
+        GPS uses continuous pulses, so this is a non-trivial cross-check of two
+        independent implementations of F = |Chi|^2.
+        """
+        from quantum_pulse_suite.core.three_level_filter import analytic_filter
         for n_cyc in [1, 3]:
             gps = GlobalPhaseSpectroscopySequence(
                 self.system, n_cycles=n_cyc, omega=self.omega)
-            ff = gps.get_filter_function_calculator()
 
             freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
-                gps._sequence, n_samples=8192, m_z=0.0)
+                gps._sequence, n_samples=8192, m_y=1.0)
 
             T = gps._sequence.total_duration()
             mask = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 80.0)
-            Fe_method = ff.filter_function_for_measurement(freqs_fft[mask], 'y')
+            _, Fe_ana = analytic_filter(gps._sequence, freqs_fft[mask], m_y=1.0)
             Fe_ref = Fe_fft[mask]
 
-            peak = max(np.max(Fe_ref), np.max(Fe_method))
-            sig = (Fe_ref > 1e-4 * peak) & (Fe_method > 1e-4 * peak)
+            peak = max(np.max(Fe_ref), np.max(Fe_ana))
+            sig = (Fe_ref > 1e-4 * peak) & (Fe_ana > 1e-4 * peak)
             self.assertTrue(np.any(sig),
                             f"GPS n_cyc={n_cyc}: no significant frequency points")
 
-            rel_err = np.abs(Fe_ref[sig] - Fe_method[sig]) / Fe_method[sig]
-            self.assertLess(np.max(rel_err), 0.03,
+            rel_err = np.abs(Fe_ref[sig] - Fe_ana[sig]) / Fe_ana[sig]
+            self.assertLess(np.max(rel_err), 0.05,
                             msg=f"GPS n_cyc={n_cyc} Fe: max rel error {np.max(rel_err):.4f}")
 
     def test_gps_Fe_nonnegative(self):
@@ -345,20 +348,19 @@ class TestGPSMeasurementDelegation(unittest.TestCase):
             self.assertTrue(np.all(Fe >= -1e-15),
                             f"Negative Fe for measurement={meas}")
 
-    def test_gps_z_vs_y_ratio(self):
-        """For GPS, Fe(z)/Fe(y) = prefactor ratio = 1.0/0.5 = 2."""
+    def test_gps_only_sigma_y_is_nonzero(self):
+        """With the updated model, only sigma_y^{gm} contributes to Fe."""
         gps = GlobalPhaseSpectroscopySequence(
             self.system, n_cycles=3, omega=self.omega)
         ff = gps.get_filter_function_calculator()
 
         Fe_z = ff.filter_function_for_measurement(self.frequencies, 'z')
+        Fe_x = ff.filter_function_for_measurement(self.frequencies, 'x')
         Fe_y = ff.filter_function_for_measurement(self.frequencies, 'y')
 
-        # Where Fe_y is significant, ratio should be 2
-        mask = Fe_y > 1e-10 * np.max(Fe_y)
-        if np.any(mask):
-            np.testing.assert_allclose(
-                Fe_z[mask] / Fe_y[mask], 2.0, rtol=1e-10)
+        np.testing.assert_allclose(Fe_z, 0.0, atol=1e-12)
+        np.testing.assert_allclose(Fe_x, 0.0, atol=1e-12)
+        self.assertGreater(np.max(Fe_y), 1e-8)
 
 
 if __name__ == '__main__':

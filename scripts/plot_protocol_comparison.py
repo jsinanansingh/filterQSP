@@ -1,24 +1,27 @@
 """
-Filter function comparison: Ramsey, GPS (integer cycle), and optimal equiangular N=4.
+Filter function comparison: Ramsey, GPS (integer cycle), and equiangular N=4,8,16.
 
 All protocols share total interrogation time T = 2*pi.
+All GPS protocols operate at delta=0 (resonant quadrature).
 
-Protocol        Omega       delta (operating point)     description
--------         -----       -----------------------     -----------
-Ramsey          20*pi       0                           pi/2 - free - pi/2
-GPS m=1         1           sqrt(15)  (k=4 zero)        1 complete Rabi cycle
-GPS m=8         8           sqrt(17)  (k=9 zero)        8 complete Rabi cycles
-Equiangular N=4 ~ pi/10T    0                           4 segments, optimised phases
+Protocol         Omega       delta     description
+-------          -----       -----     -----------
+Ramsey           20*pi       0         pi/2 - free - pi/2
+GPS m=1          1           0         1 complete Rabi cycle
+GPS m=8          8           0         8 complete Rabi cycles
+Equiangular N=4  ~1.21       0         4 segments, optimised phases
+Equiangular N=8  ~2.49       0         8 segments, optimised phases
+Equiangular N=16 ~2.60       0         16 segments, optimised phases
 
-GPS zero crossings:
-    Signal: S(delta) = -(delta/Omega_eff) * sin(m*pi*Omega_eff/Omega)
-            Omega_eff = sqrt(Omega^2 + delta^2)
-    Zeros:  delta_k = Omega * sqrt((k/m)^2 - 1),  k >= m+1 integer
-    Slope:  dS/ddelta|_{delta_k} = -(-1)^k * (m*pi/Omega) * (1 - m^2/k^2)
+NOTE on GPS sensitivity at delta=0 (H = delta*|e><e| convention):
+    With H = delta*|e><e|, the derivative d<M>/ddelta at delta=0 is T/2 for
+    ANY GPS m (since Omega_R=Omega at delta=0, and Omega*T=2*pi*m gives
+    T*Omega*cos(m*pi)/2 = +-T/2).  So sens_sq = T^2/4 = pi^2 for all GPS m,
+    identical to Ramsey.  The protocols differ only through their filter
+    functions (and hence their Kubo variances).
 
-    GPS m=1, k=4:  delta = sqrt(15) * Omega,  sens_sq = (pi * 15/16)^2
-    GPS m=8, k=9:  delta = sqrt(17/64) * Omega = sqrt(17)/8 * Omega,
-                   sens_sq = (pi * 17/81)^2
+Equiangular phases are loaded from the newest timestamped
+equiangular_opt_cache_*.npz file (white-noise optimised).
 """
 
 import sys
@@ -36,6 +39,7 @@ from quantum_pulse_suite.systems import ThreeLevelClock
 from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
 from quantum_pulse_suite.core.three_level_filter import (
     fft_three_level_filter,
+    analytic_filter,
     detuning_sensitivity,
 )
 from quantum_pulse_suite.analysis.pulse_optimizer import (
@@ -43,6 +47,9 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
     white_noise_psd,
     one_over_f_psd,
 )
+
+CACHE_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
+CACHE_PREFIX = 'equiangular_opt_cache'
 
 
 # =============================================================================
@@ -52,8 +59,8 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
 T          = 2 * np.pi       # total interrogation time
 OMEGA_FAST = 20 * np.pi      # Rabi frequency for fast pi/2 pulses in Ramsey
 
-N_FFT      = 4096
-PAD_FACTOR = 4
+N_FFT      = 4096          # time samples for direct DFT
+OMEGA_PLOT = np.logspace(-2, np.log10(30), 800)   # log-spaced for smooth loglog
 
 # GPS m=1: Omega = 2*pi*1/T = 1 rad/s (1 complete cycle in time T)
 OMEGA_GPS1 = 2 * np.pi * 1 / T    # = 1.0
@@ -61,17 +68,26 @@ OMEGA_GPS1 = 2 * np.pi * 1 / T    # = 1.0
 # GPS m=8: Omega = 2*pi*8/T = 8 rad/s (8 complete cycles in time T)
 OMEGA_GPS8 = 2 * np.pi * 8 / T    # = 8.0
 
-# Zero-crossing operating points: delta_k = Omega * sqrt((k/m)^2 - 1)
-# GPS m=1, k=4:  delta = 1 * sqrt(16 - 1) = sqrt(15) ≈ 3.873
-DELTA_GPS1_K4 = OMEGA_GPS1 * np.sqrt((4 / 1.0) ** 2 - 1)   # sqrt(15)
-
-# GPS m=8, k=9:  delta = 8 * sqrt((9/8)^2 - 1) = 8 * sqrt(17/64) = sqrt(17) ≈ 4.123
-DELTA_GPS8_K9 = OMEGA_GPS8 * np.sqrt((9 / 8.0) ** 2 - 1)   # sqrt(17)
+# Both GPS protocols at resonant quadrature (delta=0).
+# At delta=0 with Omega*T = 2*pi*m, sens_sq = pi^2 for any m.
+DELTA_GPS1 = 0.0
+DELTA_GPS8 = 0.0
 
 S_white = white_noise_psd()
 S_1_over_f = one_over_f_psd()
 
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
+
+
+def find_latest_equiangular_cache():
+    """Return the newest timestamped equiangular cache, or a legacy path."""
+    matches = sorted(CACHE_DIR.glob(f'{CACHE_PREFIX}_*.npz'))
+    if matches:
+        return matches[-1]
+    legacy = CACHE_DIR / 'equiangular_opt_cache.npz'
+    if legacy.exists():
+        return legacy
+    return None
 
 
 # =============================================================================
@@ -119,18 +135,34 @@ def build_equiangular(system, omega, phases):
 # Evaluation helper
 # =============================================================================
 
+OMEGA_MIN = 2.0 * np.pi / T   # Fourier limit: lowest resolvable frequency in time T
+
+
 def evaluate(seq, label=''):
-    """Return (sens_sq, kubo_white, fom_white, kubo_1f, fom_1f, freqs, Fe)."""
+    """Return (sens_sq, noise_white, sigma_nu_white, noise_1f, sigma_nu_1f, freqs, Fe).
+
+    Filter function F(w) = |Chi(w)|^2 on a log-spaced grid for smooth log-log
+    plots.  Noise integrals are bandlimited from OMEGA_MIN = 2*pi/T to infinity
+    (noise slower than one measurement cycle cannot be resolved).
+    sigma_nu = noise_var / F(0)  where  F(0) = sens_sq  by DC consistency.
+    """
     _, sens_sq = detuning_sensitivity(seq)
-    freqs, Fe, _, _ = fft_three_level_filter(
-        seq, n_samples=N_FFT, pad_factor=PAD_FACTOR, m_y=1.0)
-    kubo_w  = float(simpson(Fe * S_white(freqs),   x=freqs) / (2 * np.pi))
-    kubo_f  = float(simpson(Fe * S_1_over_f(freqs), x=freqs) / (2 * np.pi))
-    fom_w   = sens_sq / kubo_w  if (sens_sq > 0 and kubo_w  > 0) else 0.0
-    fom_f   = sens_sq / kubo_f  if (sens_sq > 0 and kubo_f  > 0) else 0.0
+
+    # Smooth plot grid: log-spaced, evaluated via analytic Fourier integrals
+    freqs, Fe = analytic_filter(seq, OMEGA_PLOT, m_y=1.0)
+
+    # Noise integrals: use FFT on a dense grid for accurate integration
+    # Integrate from OMEGA_MIN = 2*pi/T (Fourier limit)
+    freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
+        seq, n_samples=N_FFT, pad_factor=4, m_y=1.0)
+    mask     = freqs_fft >= OMEGA_MIN
+    noise_w  = float(simpson(Fe_fft[mask] * S_white(freqs_fft[mask]),    x=freqs_fft[mask]) / (2 * np.pi))
+    noise_f  = float(simpson(Fe_fft[mask] * S_1_over_f(freqs_fft[mask]), x=freqs_fft[mask]) / (2 * np.pi))
+    snu_w    = noise_w / sens_sq  if (sens_sq > 0 and noise_w  > 0) else 0.0
+    snu_f    = noise_f / sens_sq  if (sens_sq > 0 and noise_f  > 0) else 0.0
     if label:
-        print(f'  {label:<28}  sens={sens_sq:.4f}  kubo_w={kubo_w:.3e}  FOM_w={fom_w:.1f}')
-    return sens_sq, kubo_w, fom_w, kubo_f, fom_f, freqs, Fe
+        print(f'  {label:<28}  sens={sens_sq:.4f}  noise_w={noise_w:.3e}  sigma_nu_w={snu_w:.3e}')
+    return sens_sq, noise_w, snu_w, noise_f, snu_f, freqs, Fe
 
 
 # =============================================================================
@@ -145,17 +177,17 @@ def main():
     print('Building Ramsey (pi/2 - free - pi/2) ...')
     seq_ramsey = build_ramsey(system)
 
-    print(f'Building GPS m=1, k=4 zero (delta={DELTA_GPS1_K4:.4f}) ...')
-    seq_gps1 = build_gps_at_zero(system, OMEGA_GPS1, DELTA_GPS1_K4)
+    print('Building GPS m=1 (delta=0, resonant quadrature) ...')
+    seq_gps1 = build_gps_at_zero(system, OMEGA_GPS1, DELTA_GPS1)
 
-    print(f'Building GPS m=8, k=9 zero (delta={DELTA_GPS8_K9:.4f}) ...')
-    seq_gps8 = build_gps_at_zero(system, OMEGA_GPS8, DELTA_GPS8_K9)
+    print('Building GPS m=8 (delta=0, resonant quadrature) ...')
+    seq_gps8 = build_gps_at_zero(system, OMEGA_GPS8, DELTA_GPS8)
 
     print('Optimising equiangular N=4 (white noise) ...')
     result_eq4 = optimize_equiangular_sequence(
         system, T, N=4, noise_psd='white',
-        n_restarts=8, seed=42, n_fft=2048, pad_factor=4,
-        popsize=15, maxiter=400,
+        omega_max=8.0 * np.pi / T,   # allow OmegaT up to 8*pi per segment
+        n_restarts=15, seed=7, popsize=20, maxiter=600,
     )
     omega_eq4  = result_eq4.omega
     phases_eq4 = result_eq4.phases
@@ -163,46 +195,68 @@ def main():
     print(f'  Omega = {omega_eq4:.6f}  (Omega*T = {omega_eq4 * T:.5f})')
     print(f'  phases = {np.array2string(phases_eq4, precision=4, separator=", ")}')
 
+    # Load N=8 and N=16 from pre-computed cache (white-noise optimised phases)
+    print('Loading equiangular N=8, N=16 from cache ...')
+    cache_path = find_latest_equiangular_cache()
+    if cache_path is None:
+        raise FileNotFoundError(
+            f'No equiangular cache found matching {CACHE_PREFIX}_*.npz in {CACHE_DIR}. '
+            'Run scripts/run_equiangular_optimization.py first.'
+        )
+    _cache = np.load(str(cache_path), allow_pickle=True)
+    print(f'  using cache: {cache_path}')
+
+    omega_eq8  = float(_cache['eq_N8_white_omega'])
+    phases_eq8 = _cache['eq_N8_white_phases']
+    seq_eq8    = build_equiangular(system, omega_eq8, phases_eq8)
+    print(f'  N=8:  Omega*T = {omega_eq8 * T:.5f}')
+
+    omega_eq16  = float(_cache['eq_N16_white_omega'])
+    phases_eq16 = _cache['eq_N16_white_phases']
+    seq_eq16    = build_equiangular(system, omega_eq16, phases_eq16)
+    print(f'  N=16: Omega*T = {omega_eq16 * T:.5f}')
+
     # ── Evaluate all protocols ────────────────────────────────────────────────
     print('\nEvaluating ...')
-    res_R  = evaluate(seq_ramsey, 'Ramsey')
-    res_G1 = evaluate(seq_gps1,  f'GPS m=1 k=4 (d={DELTA_GPS1_K4:.3f})')
-    res_G8 = evaluate(seq_gps8,  f'GPS m=8 k=9 (d={DELTA_GPS8_K9:.3f})')
-    res_E4 = evaluate(seq_eq4,   f'Equiangular N=4 (Omega={omega_eq4:.4f})')
+    res_R   = evaluate(seq_ramsey, 'Ramsey')
+    res_G1  = evaluate(seq_gps1,  'GPS m=1 (d=0, resonant)')
+    res_G8  = evaluate(seq_gps8,  'GPS m=8 (d=0, resonant)')
+    res_E4  = evaluate(seq_eq4,   f'Equiangular N=4 (OmegaT={omega_eq4*T:.3f})')
+    res_E8  = evaluate(seq_eq8,   f'Equiangular N=8 (OmegaT={omega_eq8*T:.3f})')
+    res_E16 = evaluate(seq_eq16,  f'Equiangular N=16 (OmegaT={omega_eq16*T:.3f})')
 
     # Print table
     print()
-    hdr = f'{"Protocol":<32} {"sens_sq":>9} {"kubo_w":>11} {"FOM_w":>11} {"FOM_1/f":>11}'
+    hdr = f'{"Protocol":<36} {"sens_sq":>9} {"noise_w":>11} {"snu_w":>11} {"snu_1/f":>11}'
     print(hdr)
     print('-' * len(hdr))
     rows = [
-        ('Ramsey',               *res_R[:5]),
-        ('GPS m=1, k=4 zero',    *res_G1[:5]),
-        ('GPS m=8, k=9 zero',    *res_G8[:5]),
-        ('Equiangular N=4',      *res_E4[:5]),
+        ('Ramsey',                *res_R[:5]),
+        ('GPS m=1 (d=0)',         *res_G1[:5]),
+        ('GPS m=8 (d=0)',         *res_G8[:5]),
+        ('Equiangular N=4',       *res_E4[:5]),
+        ('Equiangular N=8',       *res_E8[:5]),
+        ('Equiangular N=16',      *res_E16[:5]),
     ]
-    for lbl, s, kw, fw, kf, ff in rows:
-        print(f'{lbl:<32} {s:>9.4f} {kw:>11.3e} {fw:>11.1f} {ff:>11.1f}')
+    for lbl, s, nw, sw, nf, sf in rows:
+        print(f'{lbl:<36} {s:>9.4f} {nw:>11.3e} {sw:>11.3e} {sf:>11.3e}')
 
     # ── Filter function plot ──────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
 
-    f_R,  Fe_R  = res_R[5],  res_R[6]
-    f_G1, Fe_G1 = res_G1[5], res_G1[6]
-    f_G8, Fe_G8 = res_G8[5], res_G8[6]
-    f_E4, Fe_E4 = res_E4[5], res_E4[6]
+    f_R,   Fe_R   = res_R[5],   res_R[6]
+    f_G1,  Fe_G1  = res_G1[5],  res_G1[6]
+    f_G8,  Fe_G8  = res_G8[5],  res_G8[6]
+    f_E4,  Fe_E4  = res_E4[5],  res_E4[6]
+    f_E8,  Fe_E8  = res_E8[5],  res_E8[6]
+    f_E16, Fe_E16 = res_E16[5], res_E16[6]
 
-    label_eq = (
-        rf'Equiangular $N{{=}}4$, $\Omega T={omega_eq4 * T:.3f}$'
-        rf', $\phi=[0,\,{phases_eq4[1]:.2f},\,{phases_eq4[2]:.2f},\,{phases_eq4[3]:.2f}]$'
-    )
-
-    ax.loglog(f_R,  Fe_R  / T**2 + 1e-20, color='C3', lw=2,   label=r'Ramsey')
-    ax.loglog(f_G1, Fe_G1 / T**2 + 1e-20, color='C0', lw=2,
-              label=r'GPS $m{=}1$, $k{=}4$ zero  ($\delta/\Omega = \sqrt{15}$)')
-    ax.loglog(f_G8, Fe_G8 / T**2 + 1e-20, color='C2', lw=2,
-              label=r'GPS $m{=}8$, $k{=}9$ zero  ($\delta/\Omega = \sqrt{17}/8$)')
-    ax.loglog(f_E4, Fe_E4 / T**2 + 1e-20, color='C1', lw=2.5, label=label_eq)
+    ax.loglog(f_R,   Fe_R   / T**2 + 1e-20, color='C3', lw=2,   label=r'Ramsey')
+    ax.loglog(f_G1,  Fe_G1  / T**2 + 1e-20, color='C0', lw=2,   label=r'GPS $m{=}1$')
+    ax.loglog(f_G8,  Fe_G8  / T**2 + 1e-20, color='C2', lw=2,   label=r'GPS $m{=}8$')
+    ax.loglog(f_E4,  Fe_E4  / T**2 + 1e-20, color='C1', lw=2.5, label=r'Equiangular $N{=}4$')
+    ax.loglog(f_E8,  Fe_E8  / T**2 + 1e-20, color='C4', lw=2.5, label=r'Equiangular $N{=}8$')
+    ax.loglog(f_E16, Fe_E16 / T**2 + 1e-20, color='C5', lw=2.5, label=r'Equiangular $N{=}16$')
 
     # Vertical dashed lines at Omega_GPS1 and Omega_GPS8 harmonics
     for k in range(1, 10):
@@ -213,12 +267,11 @@ def main():
             ax.axvline(OMEGA_GPS8 * k, color='C2', lw=0.5, ls=':', alpha=0.4)
 
     ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=12)
-    ax.set_ylabel(r'$F_e(\omega)\,/\,T^2$', fontsize=12)
+    ax.set_ylabel(r'$F(\omega)\,/\,T^2$', fontsize=12)
     ax.set_title(
         r'Three-level clock filter functions at equal total time $T = 2\pi$'
         '\n'
-        r'GPS protocols at zero-crossing operating points; '
-        r'equiangular at $\delta = 0$',
+        r'All protocols at $\delta = 0$ ($H_\delta = \delta|e\rangle\langle e|$)',
         fontsize=11)
     ax.set_xlim([3e-2, 30])
     ax.set_ylim([1e-9, 1.5])
@@ -228,7 +281,7 @@ def main():
 
     for ext in ['pdf', 'png']:
         path = OUTPUT_DIR / f'protocol_comparison.{ext}'
-        fig.savefig(path, dpi=150, bbox_inches='tight')
+        fig.savefig(path, dpi=300, bbox_inches='tight')
         print(f'Saved: {path}')
 
     plt.close('all')

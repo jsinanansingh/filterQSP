@@ -1,25 +1,20 @@
 """
 Kubo linear-response validity test (Section VI).
 
-Compares the linear-response (Kubo) variance prediction against the exact
-result for two protocols as a function of noise amplitude epsilon_rms.
+Compares the linear-response filter-function variance prediction against
+time-domain Monte Carlo simulation for the ACTUAL sequences used in the code:
 
-White noise model:  H_noise = beta(t) * |e><e|,
-                    E[beta(t) beta(t')] = S0 * delta(t - t')
-                    epsilon_rms = sqrt(S0 * T)
+  1. Ramsey with finite pi/2 pulses at Omega_fast
+  2. GPS m=1 (single continuous x-drive over T)
 
-Analytic linear-Kubo slopes (derived by first-order perturbation theory):
+White noise model:
+    H_noise = beta(t) * |e><e|,
+    E[beta(t) beta(t')] = S0 * delta(t - t'),
+    epsilon_rms = sqrt(S0 * T)
 
-  Ramsey (instantaneous-pulse limit):
-    M = -sin(Phi)/2,   Phi = integral_0^T beta dt ~ N(0, S0*T)
-    Var_exact[M] = (1 - exp(-2*S0*T)) / 8           (analytic, all orders)
-    Var_Kubo[M]  = S0 * T / 4                        (linear in S0)
-
-  GPS m=1 (Omega=1, T=2pi, single continuous x-drive):
-    delta_M = -integral_0^T beta(t) sin(Omega*(T-t)/2) sin(Omega*t/2) dt
-    For Omega*T=2pi: sin(Omega*(T-t)/2)*sin(Omega*t/2) = sin^2(Omega*t/2)
-    Var_Kubo[M]  = S0 * integral_0^T sin^4(t/2) dt = S0 * 3*pi/4
-    Exact variance via Monte Carlo (full 2x2 g-e propagation).
+For reference, the script also retains the ideal instantaneous-pulse Ramsey
+formula, but the primary validation is now sequence-matched Monte Carlo vs the
+filter-function Kubo integral computed from the same finite-duration protocol.
 """
 
 import sys
@@ -35,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from quantum_pulse_suite.systems import ThreeLevelClock
 from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
-from quantum_pulse_suite.core.three_level_filter import fft_three_level_filter
+from quantum_pulse_suite.core.three_level_filter import analytic_filter
 
 T          = 2 * np.pi
 OMEGA_FAST = 20.0 * np.pi
@@ -69,10 +64,22 @@ def build_gps1(system):
 # Kubo prediction from filter function (code convention: one-sided integral)
 # =============================================================================
 
-def kubo_integral_onesided(seq):
-    """Integrate Fe(omega) over positive frequencies (code's Kubo convention)."""
-    fr, Fe, _, _ = fft_three_level_filter(seq, n_samples=4096, pad_factor=4, m_y=1.0)
-    return float(simpson(Fe, x=fr) / (2 * np.pi))
+def kubo_integral_onesided(seq, omega_max=300.0, n_omega=20000):
+    """
+    Integrate Fe(omega) against a one-sided white-noise PSD.
+
+    For the convention
+        E[beta(t) beta(t')] = S0 delta(t-t'),
+    the corresponding one-sided white PSD gives
+        Var[M] = S0 * int_0^inf Fe(omega) domega / pi.
+
+    We evaluate the coefficient using the analytic filter rather than the FFT
+    grid, because the FFT estimate is sensitive to the coarse treatment of the
+    zero-frequency bin for white-noise integrals.
+    """
+    omegas = np.linspace(0.0, omega_max, n_omega)
+    _, Fe = analytic_filter(seq, omegas, m_y=1.0)
+    return float(simpson(Fe, x=omegas) / np.pi)
 
 
 # =============================================================================
@@ -88,6 +95,37 @@ def ramsey_exact_var(S0_arr, T_free):
 # Monte Carlo variance via 2x2 time-stepping of the g-e subspace
 # =============================================================================
 
+def _control_schedule(seq, dt_target):
+    """Return piecewise-constant (omega, delta, dt) arrays on an adaptive grid."""
+    omega_steps = []
+    delta_steps = []
+    dt_steps = []
+
+    for elem in seq.elements:
+        dur = elem.duration()
+        if dur <= 0.0:
+            continue
+
+        n_sub = max(1, int(np.ceil(dur / dt_target)))
+        dt = dur / n_sub
+
+        if hasattr(elem, 'omega'):
+            omega = float(elem.omega)
+            delta = float(elem.delta)
+        elif hasattr(elem, 'delta'):
+            omega = 0.0
+            delta = float(elem.delta)
+        else:
+            raise ValueError(f'Unsupported element type for MC validation: {type(elem).__name__}')
+
+        omega_steps.extend([omega] * n_sub)
+        delta_steps.extend([delta] * n_sub)
+        dt_steps.extend([dt] * n_sub)
+
+    return (np.asarray(omega_steps, dtype=float),
+            np.asarray(delta_steps, dtype=float),
+            np.asarray(dt_steps, dtype=float))
+
 def _step_u2(bk, Omega, dt):
     """
     Propagator U = exp(-i * H * dt) for H = [[0, Omega/2], [Omega/2, beta]] (2x2).
@@ -100,34 +138,56 @@ def _step_u2(bk, Omega, dt):
     c    = np.cos(half)
     s    = np.sin(half)
     ph   = np.exp(-1j * bk * dt / 2.0)
-    u00  = ph * (c + 1j * bk / OmR * s)
-    u01  = ph * (-1j * Omega / OmR * s)
-    u11  = ph * (c - 1j * bk / OmR * s)
+
+    u00 = ph * c
+    u01 = np.zeros_like(bk, dtype=complex)
+    u11 = ph * c
+
+    mask = OmR > 1e-15
+    if np.any(mask):
+        ratio_b = bk[mask] / OmR[mask]
+        ratio_o = Omega / OmR[mask]
+        u00[mask] = ph[mask] * (c[mask] + 1j * ratio_b * s[mask])
+        u01[mask] = ph[mask] * (-1j * ratio_o * s[mask])
+        u11[mask] = ph[mask] * (c[mask] - 1j * ratio_b * s[mask])
     return u00, u01, u11
 
 
-def mc_gps_var(S0, Omega, n_steps, n_mc, rng):
+def mc_sequence_var(seq, S0, dt_target, n_mc, rng, batch_size=4096):
     """
-    Monte Carlo variance of M = 2 Im(conj(psi_g) * 1/sqrt(2)) for GPS.
+    Monte Carlo variance of M = sigma_y^{gm} for an actual probe sequence.
 
-    Initial g-e state: (1/sqrt(2), 0).  |m> stays at 1/sqrt(2).
+    The probe {|g>,|e>} subspace is evolved with piecewise-constant control and
+    white noise beta(t)|e><e|.  The clock reference |m> stays fixed at 1/sqrt(2),
+    so the final observable is
+
+        M = 2 Im(conj(psi_g) * psi_m),   psi_m = 1/sqrt(2).
     """
-    dt        = T / n_steps
-    sig_beta  = np.sqrt(S0 / dt)
-    beta_all  = rng.normal(0.0, sig_beta, (n_mc, n_steps))
+    omega_grid, delta_grid, dt_grid = _control_schedule(seq, dt_target)
 
-    psi_g = np.full(n_mc, 1.0 / np.sqrt(2), dtype=complex)
-    psi_e = np.zeros(n_mc, dtype=complex)
+    count = 0
+    sum_M = 0.0
+    sum_M2 = 0.0
 
-    for k in range(n_steps):
-        u00, u01, u11 = _step_u2(beta_all[:, k], Omega, dt)
-        new_g  = u00 * psi_g + u01 * psi_e
-        psi_e  = u01 * psi_g + u11 * psi_e
-        psi_g  = new_g
+    while count < n_mc:
+        n_batch = min(batch_size, n_mc - count)
+        psi_g = np.full(n_batch, 1.0 / np.sqrt(2), dtype=complex)
+        psi_e = np.zeros(n_batch, dtype=complex)
 
-    # M = 2 * Im(conj(psi_g) * psi_m),  psi_m = 1/sqrt(2)
-    M = 2.0 * np.imag(np.conj(psi_g) / np.sqrt(2))
-    return float(np.var(M))
+        for omega_k, delta_k, dt_k in zip(omega_grid, delta_grid, dt_grid):
+            beta_k = delta_k + rng.normal(0.0, np.sqrt(S0 / dt_k), n_batch)
+            u00, u01, u11 = _step_u2(beta_k, omega_k, dt_k)
+            new_g = u00 * psi_g + u01 * psi_e
+            psi_e = u01 * psi_g + u11 * psi_e
+            psi_g = new_g
+
+        M = 2.0 * np.imag(np.conj(psi_g) / np.sqrt(2))
+        sum_M += float(np.sum(M))
+        sum_M2 += float(np.sum(M**2))
+        count += n_batch
+
+    mean_M = sum_M / n_mc
+    return sum_M2 / n_mc - mean_M**2
 
 
 def mc_ramsey_var(S0, T_free, n_mc, rng):
@@ -154,39 +214,44 @@ def main():
 
     k_R  = kubo_integral_onesided(seq_R)
     k_G1 = kubo_integral_onesided(seq_G1)
-    print(f'Kubo integrals (one-sided, code convention):')
-    print(f'  Ramsey  k = {k_R:.4f}   (T/4 = {T/4:.4f})')
-    print(f'  GPS m=1 k = {k_G1:.4f}')
+    print('Kubo integrals (one-sided, actual sequences):')
+    print(f'  Ramsey finite-pulse  k = {k_R:.4f}   (instantaneous-limit T_free/4 = {tau_free/4:.4f})')
+    print(f'  GPS m=1             k = {k_G1:.4f}')
 
     # Sweep epsilon_rms = sqrt(S0 * T)
     eps_arr = np.logspace(np.log10(0.05), np.log10(3.5), 50)
     S0_arr  = eps_arr**2 / T
 
     # --- Ramsey ---
-    var_R_exact  = ramsey_exact_var(S0_arr, tau_free)
-    var_R_kubo   = S0_arr * tau_free / 4.0          # correct linear Kubo (exact slope)
-    var_R_kubo_c = S0_arr * k_R                     # code's one-sided Kubo (may differ)
+    var_R_exact_inst = ramsey_exact_var(S0_arr, tau_free)
+    var_R_kubo_inst  = S0_arr * tau_free / 4.0      # instantaneous-pulse limit
+    var_R_kubo_seq   = S0_arr * k_R                 # actual finite-pulse sequence
 
     # MC only at a coarser grid to save time
     eps_mc = np.array([0.1, 0.2, 0.4, 0.7, 1.0, 1.4, 2.0, 2.8, 3.5])
     S0_mc  = eps_mc**2 / T
-    var_R_mc  = np.array([mc_ramsey_var(s, tau_free, 200_000, rng) for s in S0_mc])
-
-    # --- GPS m=1 ---
-    n_steps = 800
-    n_mc    = 30_000
-    print(f'\nRunning GPS m=1 MC ({len(eps_mc)} noise levels, {n_mc} samples each)...')
-    var_G1_mc = np.array([
-        mc_gps_var(s, OMEGA_GPS1, n_steps, n_mc, rng) for s in S0_mc
+    var_R_mc_inst = np.array([mc_ramsey_var(s, tau_free, 200_000, rng) for s in S0_mc])
+    dt_target_R = tau_free / 1500.0
+    n_mc_R    = 30_000
+    print(f'Running Ramsey finite-pulse MC ({len(eps_mc)} noise levels, {n_mc_R} samples each)...')
+    var_R_mc_seq = np.array([
+        mc_sequence_var(seq_R, s, dt_target_R, n_mc_R, rng) for s in S0_mc
     ])
     print('  done.')
 
-    # Code Kubo for GPS (one-sided convention)
-    var_G1_kubo_c = S0_arr * k_G1
+    # --- GPS m=1 ---
+    dt_target_G1 = T / 1200.0
+    n_mc    = 30_000
+    print(f'\nRunning GPS m=1 MC ({len(eps_mc)} noise levels, {n_mc} samples each)...')
+    var_G1_mc = np.array([
+        mc_sequence_var(seq_G1, s, dt_target_G1, n_mc, rng) for s in S0_mc
+    ])
+    print('  done.')
 
-    # Analytic linear-Kubo slope for GPS m=1: int_0^{2pi} sin^4(t/2) dt = 3*pi/4
-    slope_G1      = 3.0 * np.pi / 4.0
-    var_G1_kubo_a = S0_arr * slope_G1          # two-sided, correct analytic Kubo
+    # Kubo for GPS m=1 (actual sequence and ideal analytic reference)
+    var_G1_kubo_seq = S0_arr * k_G1
+    slope_G1_inst   = 3.0 * np.pi / 4.0
+    var_G1_kubo_inst = S0_arr * slope_G1_inst
 
     # ==========================================================================
     # Figure 1: absolute variance vs epsilon_rms
@@ -194,10 +259,11 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
 
     ax = axes[0]
-    ax.loglog(eps_arr, var_R_exact,  'C3',   lw=2,   label='Ramsey exact')
-    ax.loglog(eps_arr, var_R_kubo,   'C3--', lw=1.5, label=r'Ramsey Kubo ($S_0 T/4$)')
-    ax.loglog(eps_arr, var_R_kubo_c, 'C3:',  lw=1.5, label=r'Ramsey Kubo (code $k$)')
-    ax.loglog(eps_mc,  var_R_mc,     'C3o',  ms=5,   label='Ramsey MC')
+    ax.loglog(eps_arr, var_R_exact_inst, '0.5',  lw=1.5, label='Ramsey exact (instantaneous limit)')
+    ax.loglog(eps_arr, var_R_kubo_inst,  '0.5',  lw=1.2, ls='--', label=r'Ramsey Kubo (instantaneous limit)')
+    ax.loglog(eps_arr, var_R_kubo_seq,   'C3--', lw=2.0, label='Ramsey Kubo (actual sequence)')
+    ax.loglog(eps_mc,  var_R_mc_seq,     'C3o',  ms=5,   label='Ramsey MC (actual sequence)')
+    ax.loglog(eps_mc,  var_R_mc_inst,    'o', color='0.5', ms=4, label='Ramsey MC (instantaneous limit)')
     ax.axvline(1.0, color='k', lw=0.8, ls='--', alpha=0.5)
     ax.set_xlabel(r'$\epsilon_{\rm rms} = \sqrt{S_0 T}$', fontsize=11)
     ax.set_ylabel(r'${\rm Var}[M]$', fontsize=11)
@@ -208,8 +274,8 @@ def main():
     ax.set_ylim([5e-5, 0.5])
 
     ax = axes[1]
-    ax.loglog(eps_arr, var_G1_kubo_a, 'C0-',  lw=2.0, label=r'GPS m=1 Kubo ($\frac{3\pi}{4}S_0$)')
-    ax.loglog(eps_arr, var_G1_kubo_c, 'C0--', lw=1.5, label='GPS m=1 Kubo (code, 1-sided)')
+    ax.loglog(eps_arr, var_G1_kubo_inst, '0.5',  lw=1.2, label=r'GPS m=1 Kubo (ideal $\frac{3\pi}{4}S_0$)')
+    ax.loglog(eps_arr, var_G1_kubo_seq,  'C0--', lw=2.0, label='GPS m=1 Kubo (actual sequence)')
     ax.loglog(eps_mc,  var_G1_mc,     'C0o',  ms=5,   label='GPS m=1 MC')
     ax.axvline(1.0, color='k', lw=0.8, ls='--', alpha=0.5)
     ax.set_xlabel(r'$\epsilon_{\rm rms} = \sqrt{S_0 T}$', fontsize=11)
@@ -234,15 +300,17 @@ def main():
     # Use the *correct* Kubo slope (T_free/4 for Ramsey) as the linear baseline.
     # The ratio is 1 in the linear regime and decreases when Kubo overestimates.
     eps_ratio = eps_arr
-    ratio_R_exact = var_R_exact / (S0_arr * tau_free / 4.0)
-    ratio_R_mc    = var_R_mc     / (S0_mc   * tau_free / 4.0)
+    ratio_R_exact_inst = var_R_exact_inst / (S0_arr * tau_free / 4.0)
+    ratio_R_mc_inst    = var_R_mc_inst    / (S0_mc   * tau_free / 4.0)
+    ratio_R_mc_seq     = var_R_mc_seq     / (S0_mc   * k_R)
 
-    ratio_G1_mc = var_G1_mc / (S0_mc * slope_G1)
+    ratio_G1_mc = var_G1_mc / (S0_mc * k_G1)
 
     fig2, ax2 = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    ax2.semilogx(eps_ratio, ratio_R_exact,  'C3',   lw=2.5, label='Ramsey exact / Kubo$_0$')
-    ax2.semilogx(eps_mc,    ratio_R_mc,     'C3o',  ms=6,   label='Ramsey MC / Kubo$_0$')
-    ax2.semilogx(eps_mc,    ratio_G1_mc,    'C0s',  ms=6,   label='GPS m=1 MC / Kubo$_0$')
+    ax2.semilogx(eps_ratio, ratio_R_exact_inst,  '0.5', lw=1.8, label='Ramsey exact / Kubo$_0$ (instantaneous)')
+    ax2.semilogx(eps_mc,    ratio_R_mc_inst,     'o', color='0.5', ms=5, label='Ramsey MC / Kubo$_0$ (instantaneous)')
+    ax2.semilogx(eps_mc,    ratio_R_mc_seq,      'C3o',  ms=6,   label='Ramsey MC / Kubo$_0$ (actual sequence)')
+    ax2.semilogx(eps_mc,    ratio_G1_mc,         'C0s',  ms=6,   label='GPS m=1 MC / Kubo$_0$ (actual sequence)')
     ax2.axhline(1.0, color='gray', lw=1.2, ls='--', label='Kubo (linear response)')
     ax2.axvline(1.0, color='k',    lw=0.8, ls='--', alpha=0.5, label=r'$\epsilon_{\rm rms}=1$')
     ax2.set_xlabel(r'$\epsilon_{\rm rms} = \sqrt{S_0 T}$', fontsize=12)
@@ -264,25 +332,25 @@ def main():
     # ==========================================================================
     # Figure 3: filter-function Kubo vs MC comparison
     # ==========================================================================
-    # Show code-Kubo slope vs MC for BOTH protocols on one panel.
+    # Show sequence-matched Kubo slope vs MC for BOTH protocols on one panel.
     fig3, axes3 = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
 
     ax = axes3[0]
-    ax.loglog(eps_arr, var_R_kubo_c, 'C3--', lw=2, label='Kubo (filter function)')
-    ax.loglog(eps_arr, var_R_exact,  'C3',   lw=2, label='Exact analytic')
-    ax.loglog(eps_mc,  var_R_mc,     'C3o',  ms=5, label='MC')
+    ax.loglog(eps_arr, var_R_kubo_seq, 'C3--', lw=2, label='Kubo (filter function, actual sequence)')
+    ax.loglog(eps_mc,  var_R_mc_seq,   'C3o',  ms=5, label='MC (actual sequence)')
+    ax.loglog(eps_arr, var_R_kubo_inst, '0.5', lw=1.2, label='Kubo (instantaneous limit)')
     ax.axvline(1.0, color='k', lw=0.8, ls='--', alpha=0.5)
     ax.set_xlabel(r'$\epsilon_{\rm rms}$', fontsize=11)
     ax.set_ylabel(r'${\rm Var}[M]$', fontsize=11)
-    ax.set_title('Ramsey: Kubo vs exact', fontsize=11)
+    ax.set_title('Ramsey: Kubo vs MC', fontsize=11)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3, which='both')
     ax.set_xlim([0.04, 4])
     ax.set_ylim([5e-5, 0.5])
 
     ax = axes3[1]
-    ax.loglog(eps_arr, var_G1_kubo_a, 'C0-',  lw=2, label=r'Kubo analytic ($\frac{3\pi}{4}S_0$)')
-    ax.loglog(eps_arr, var_G1_kubo_c, 'C0--', lw=2, label='Kubo code (1-sided)')
+    ax.loglog(eps_arr, var_G1_kubo_seq, 'C0--', lw=2, label='Kubo (filter function, actual sequence)')
+    ax.loglog(eps_arr, var_G1_kubo_inst, '0.5', lw=1.2, label=r'Kubo (ideal $\frac{3\pi}{4}S_0$)')
     ax.loglog(eps_mc,  var_G1_mc,     'C0o',  ms=5, label='MC')
     ax.axvline(1.0, color='k', lw=0.8, ls='--', alpha=0.5)
     ax.set_xlabel(r'$\epsilon_{\rm rms}$', fontsize=11)
@@ -294,7 +362,7 @@ def main():
     ax.set_ylim([5e-5, 0.5])
 
     fig3.suptitle(
-        r'Filter-function Kubo formula vs exact variance ($T=2\pi$, white noise)',
+        r'Filter-function Kubo formula vs time-domain Monte Carlo ($T=2\pi$, white noise)',
         fontsize=12)
 
     for ext in ['pdf', 'png']:
@@ -305,9 +373,9 @@ def main():
     # Summary table
     # ==========================================================================
     print('\n--- Kubo breakdown summary ---')
-    print(f'{"eps_rms":>10}  {"Var_R_exact":>14}  {"Var_R_Kubo":>12}  {"ratio":>8}')
+    print(f'{"eps_rms":>10}  {"Var_R_MC_seq":>14}  {"Var_R_Kubo_seq":>14}  {"ratio":>8}')
     for eps, S0, v_ex, v_ku in zip(
-            eps_arr[::5], S0_arr[::5], var_R_exact[::5], var_R_kubo[::5]):
+            eps_mc, S0_mc, var_R_mc_seq, S0_mc * k_R):
         print(f'{eps:>10.3f}  {v_ex:>14.5e}  {v_ku:>12.5e}  {v_ex/v_ku:>8.4f}')
 
     plt.close('all')

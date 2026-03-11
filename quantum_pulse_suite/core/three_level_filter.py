@@ -1,23 +1,60 @@
 """
 Three-level clock filter functions.
 
-Computes the noise variance <dM^2> for a three-level Lambda clock system where:
+Computes the classical noise variance Var[<dM>] for a three-level Lambda clock
+system where:
 - QSP control acts on {|g>, |e>} subspace (probe transition)
-- Initial state is (|g> + |f>)/sqrt(2)
-- Measurement observable M = m . sigma_gf acts on {|g>, |f>} manifold
-- Two independent noise sources: beta_e(t) on |e><e| and beta_f(t) on |f><f|
+- Initial state is (|g> + |m>)/sqrt(2)
+- Measurement observable M = m . sigma_gm acts on {|g>, |m>} manifold
+- Noise source: beta_e(t) on |e><e|, and separately beta_m(t) on |m><m|
 
-The variance decomposes as (Eq 75 from draft):
-    <dM^2> = (1/hbar^2) int dw/2pi [S_be(w) Fe(w) + S_bf(w) Ff(w)]
-F
-with two filter functions:
-- Fe(w) = 1/2 * (1 + 2*m_z*m_x) * |Phi(w)|^2  + (m_x^2 + m_y^2) * |int_0^T dt sum_j W_j(t) |G_j(t)|^2 e^{-iwt}|^2 (Eq 78)
-- Ff(w) = (m_z^2 - 1) * (1 - cos(w*T)) / w^2          (Eq 76)
-- Phi(w) = int_0^T dt sum_j W_j(t) F*_j(t) G_j(t) e^{-iwt}  (Eq 79)
+The relevant noise variance for frequency estimation is the shot-to-shot
+variance of the signal mean <M>, averaged over classical stochastic noise:
+
+    Var[<dM>]_noise = int dw/2pi  S_be(w) F(w)
+
+where the filter function F(w) is determined by the sensitivity trajectory
+
+    r(t) = <psi_I(t)|[M_I(t), H_e]|psi_I(t)>  =  i|G(t)|^2
+
+and F(w) = |FT{r(t)}(w)|^2 = |Chi(w)|^2  (Chi = FT[|G(t)|^2]).
+
+This satisfies the DC consistency condition  F(0) = sens_sq  (the signal
+slope squared equals the filter function value at zero frequency).
+
+The figure of merit is the normalised frequency variance:
+
+    sigma_nu = Var[<dM>]_noise / F(0) = int dw/2pi S(w) F(w) / F(0)
+
+Two filter functions are implemented:
+- F(w)  = m_y^2 * |Chi(w)|^2   where  Chi(w) = FT[|G(t)|^2]   (e-noise)
+- Ff(w) = (1 - m_z^2) * (1 - cos(w*T)) / w^2                  (m-noise)
 """
 
 import numpy as np
 from scipy.integrate import simpson, quad
+
+
+def default_omega_cutoff(T):
+    """Default low-frequency cutoff in angular-frequency units: 2*pi/T."""
+    return 2.0 * np.pi / T
+
+
+def resolve_omega_cutoff(T, omega_cutoff=None):
+    """
+    Resolve the low-frequency integration cutoff.
+
+    Parameters
+    ----------
+    T : float
+        Total interrogation time.
+    omega_cutoff : float or None
+        Lower cutoff in angular-frequency units.  If None, use the Fourier
+        limit 2*pi/T.  Set to 0.0 to integrate from DC.
+    """
+    if omega_cutoff is None:
+        return default_omega_cutoff(T)
+    return float(omega_cutoff)
 
 
 def Ff_analytic(frequencies, T, m_z):
@@ -25,7 +62,7 @@ def Ff_analytic(frequencies, T, m_z):
     Compute the f-noise filter function Ff(w).
 
     Protocol-independent filter function for noise on the |f> state.
-        Ff(w) = (m_z^2 - 1) * (1 - cos(w*T)) / w^2
+        Ff(w) = (1 - m_z^2) * (1 - cos(w*T)) / w^2
 
     Parameters
     ----------
@@ -49,9 +86,9 @@ def Ff_analytic(frequencies, T, m_z):
     large = ~small
 
     if np.any(small):
-        result[small] = (m_z**2 - 1) * T**2 / 2
+        result[small] = (1 - m_z**2) * T**2 / 2
     if np.any(large):
-        result[large] = (m_z**2 - 1) * (1 - np.cos(w[large] * T)) / w[large]**2
+        result[large] = (1 - m_z**2) * (1 - np.cos(w[large] * T)) / w[large]**2
 
     return result
 
@@ -79,10 +116,11 @@ def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
     """
     Compute three-level clock filter functions via FFT.
 
-    Samples phi(t) = F*(t) G(t) and chi(t) = |G(t)|^2 on a time grid,
-    zero-pads, and FFTs to obtain Phi(w) and Chi(w). Then constructs:
+    Samples chi(t) = |G(t)|^2 on a time grid, zero-pads, and FFTs to obtain
+    Chi(w).  Also computes phi(t) = F*(t)G(t) → Phi(w) for diagnostics.
+    Constructs the classical noise filter function:
 
-        Fe(w) = 1/2*(1 + 2*m_z*m_x)*|Phi(w)|^2 + (m_x^2 + m_y^2)*|Chi(w)|^2
+        F(w) = m_y^2 * |Chi(w)|^2
 
     Parameters
     ----------
@@ -93,18 +131,19 @@ def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
     pad_factor : int
         Zero-padding factor for spectral interpolation.
     m_x, m_y, m_z : float
-        Components of measurement direction in {|g>, |f>} Bloch sphere.
+        Components of measurement direction in {|g>, |m>} Bloch sphere.
+        Only m_y enters F(w); m_x, m_z are accepted for API compatibility.
 
     Returns
     -------
     frequencies : np.ndarray
         Positive angular frequencies.
     Fe : np.ndarray
-        e-noise filter function at each frequency.
+        e-noise filter function F(w) = m_y^2 |Chi(w)|^2 at each frequency.
     Ff : np.ndarray
-        f-noise filter function at each frequency.
-    Phi : np.ndarray
-        Core spectral quantity Phi(w) at each frequency.
+        m-noise filter function at each frequency.
+    Chi : np.ndarray
+        Spectral quantity Chi(w) = FT[|G(t)|^2] at each frequency.
     """
     T = seq.total_duration()
     dt = T / n_samples
@@ -175,14 +214,99 @@ def fft_three_level_filter(seq, n_samples=4096, pad_factor=4,
     Phi_pos = Phi_fft[pos_mask]
     Chi_pos = Chi_fft[pos_mask]
 
-    # Construct Fe(w) = 1/2*(1 + 2*m_z*m_x)*|Phi|^2 + (m_x^2 + m_y^2)*|Chi|^2
-    Fe = (0.5 * (1 + 2 * m_z * m_x) * np.abs(Phi_pos)**2
-          + (m_x**2 + m_y**2) * np.abs(Chi_pos)**2)
+    # F(w) = m_y^2 * |Chi|^2  (classical noise filter function)
+    Fe = m_y**2 * np.abs(Chi_pos)**2
 
     # Construct Ff(w)
     Ff = Ff_analytic(freqs_pos, T, m_z)
 
-    return freqs_pos, Fe, Ff, Phi_pos
+    return freqs_pos, Fe, Ff, Chi_pos
+
+
+def direct_dft_filter(seq, omega_array, n_samples=4096, m_y=1.0):
+    """
+    Compute Fe(omega) at arbitrary frequencies via direct DFT summation.
+
+    Unlike fft_three_level_filter (which returns uniformly spaced frequencies),
+    this evaluates the Fourier transform at exactly the requested omega values.
+    Use with log-spaced omega_array for smooth log-log filter function plots.
+
+    The computation is O(n_samples * len(omega_array)) — fast for n_samples=4096
+    and a few hundred omega points.
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+        Pulse sequence on the probe transition {|g>, |e>}.
+    omega_array : array_like
+        Angular frequencies at which to evaluate Fe (rad/s).  Can be any set
+        of frequencies, e.g. np.logspace(-2, 2, 500).
+    n_samples : int
+        Number of uniform time samples for the path functions.
+    m_y : float
+        y-component of measurement direction (typically 1.0 for sigma_y^{gm}).
+
+    Returns
+    -------
+    omega_array : np.ndarray
+        Same as input, as a numpy array.
+    Fe : np.ndarray
+        e-noise filter function F(omega) = m_y^2 * |Chi|^2.
+    """
+    omega_array = np.asarray(omega_array, dtype=float)
+    T = seq.total_duration()
+    dt = T / n_samples
+    subspace = seq.subspace
+    elements = seq.elements
+    d = seq.dim
+
+    # Build segment list (same as fft_three_level_filter)
+    segments = []
+    U_cumulative = np.eye(d, dtype=complex)
+    cumtime = 0.0
+    for elem in elements:
+        dur = elem.duration()
+        if dur == 0:
+            U_cumulative = elem.unitary() @ U_cumulative
+        else:
+            H_elem = elem.hamiltonian()
+            eigvals, V = np.linalg.eigh(H_elem)
+            segments.append((
+                cumtime, cumtime + dur,
+                eigvals, V, V.conj().T,
+                U_cumulative.copy()
+            ))
+            U_cumulative = elem.unitary() @ U_cumulative
+            cumtime += dur
+
+    # Sample phi(t) = F*(t)G(t) and chi(t) = |G(t)|^2 on uniform time grid
+    times = np.linspace(0, T, n_samples, endpoint=False)
+    phi_samples = np.zeros(n_samples, dtype=complex)
+    chi_samples = np.zeros(n_samples, dtype=float)
+
+    for seg_start, seg_end, eigvals, V, Vdag, U_before in segments:
+        mask = (times >= seg_start) & (times < seg_end)
+        indices = np.where(mask)[0]
+        t_local = times[indices] - seg_start
+        for j, idx in enumerate(indices):
+            exp_diag = np.exp(-1j * eigvals * t_local[j])
+            U_partial = V @ (exp_diag[:, None] * Vdag)
+            U_t = U_partial @ U_before
+            U_sub = subspace.project_operator(U_t)
+            f_t = U_sub[0, 0]
+            g_t = U_sub[0, 1] / 1j
+            phi_samples[idx] = np.conj(f_t) * g_t
+            chi_samples[idx] = np.abs(g_t)**2
+
+    # Direct DFT at requested frequencies via matrix multiply
+    # Phi(w) = dt * sum_k phi[k] * exp(-i*w*t[k])
+    # Shape: (n_omega, n_samples) @ (n_samples,) -> (n_omega,)
+    phases = np.exp(-1j * np.outer(omega_array, times))  # (n_omega, n_time)
+    Phi = phases @ phi_samples * dt
+    Chi = phases @ chi_samples * dt
+
+    Fe = m_y**2 * np.abs(Chi)**2
+    return omega_array, Fe
 
 
 def fft_phase_filter(seq, n_samples=4096, pad_factor=4,
@@ -825,7 +949,8 @@ def analytic_three_level_filter(seq, frequencies, m_x=0.0, m_y=0.0, m_z=0.0):
     frequencies : array_like
         Angular frequencies at which to evaluate.
     m_x, m_y, m_z : float
-        Components of measurement direction in {|g>, |f>} Bloch sphere.
+        Components of measurement direction in {|g>, |m>} Bloch sphere.
+        Only m_y enters Fe; m_x is accepted for API compatibility.
 
     Returns
     -------
@@ -835,8 +960,8 @@ def analytic_three_level_filter(seq, frequencies, m_x=0.0, m_y=0.0, m_z=0.0):
         e-noise filter function at each frequency.
     Ff : np.ndarray
         f-noise filter function at each frequency.
-    Phi : np.ndarray
-        Core spectral quantity Phi(w) at each frequency.
+    Chi : np.ndarray
+        Core spectral quantity Chi(w) = FT[|G(t)|^2] at each frequency.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     T = seq.total_duration()
@@ -878,14 +1003,13 @@ def analytic_three_level_filter(seq, frequencies, m_x=0.0, m_y=0.0, m_z=0.0):
             _add_continuous_segment_chi(
                 Chi, G_func, t_start, t_end, frequencies)
 
-    # Construct Fe(w) = 1/2*(1+2*m_z*m_x)*|Phi|^2 + (m_x^2+m_y^2)*|Chi|^2
-    Fe = (0.5 * (1 + 2 * m_z * m_x) * np.abs(Phi)**2
-          + (m_x**2 + m_y**2) * np.abs(Chi)**2)
+    # F(w) = m_y^2 * |Chi|^2  (classical noise filter function)
+    Fe = m_y**2 * np.abs(Chi)**2
 
     # Construct Ff(w)
     Ff = Ff_analytic(frequencies, T, m_z)
 
-    return frequencies, Fe, Ff, Phi
+    return frequencies, Fe, Ff, Chi
 
 
 def _add_continuous_segment_phi(Phi, F_func, G_func, t_start, t_end,
@@ -925,13 +1049,23 @@ def _probe_ck_at_delta(seq, delta_extra):
     additional global laser detuning delta_extra on top of each element's
     stored delta.
 
-    The laser detuning acts on every time-evolution segment as
-        H_delta = delta/2 * (|e><e| - |g><g|)
-    giving the probe SU(2) update
+    The physical laser detuning Hamiltonian is
+        H_delta = delta * |e><e|
+    which equals the traceless SU(2) part  delta/2*(|e><e|-|g><g|)  plus a
+    global probe-subspace phase  delta/2 * I.  The SU(2) update for free
+    evolution of duration tau is therefore
         diag(exp(+i delta tau/2),  exp(-i delta tau/2))
-    for free evolution of duration tau.  Continuous-pulse elements use the
-    full off-resonant Rabi formula with delta_total = element.delta + delta_extra.
-    Instantaneous pulses are delta-independent.
+    (same as the traceless convention), but additionally a global phase
+        exp(-i delta tau/2)
+    accumulates on the probe subspace relative to the untouched clock state
+    |m>.  This function returns both the SU(2) parameters (f, g) and the
+    accumulated probe global phase so that callers can apply the correct
+    relative phase between probe and clock components.
+
+    Continuous-pulse elements use the full off-resonant Rabi formula with
+    delta_total = element.delta + delta_extra and also accumulate a global
+    phase exp(-i delta_total tau/2).  Instantaneous pulses are
+    delta-independent and contribute no global phase.
 
     Works for both MultiLevelPulseSequence (3-level) and PulseSequence (2-level).
 
@@ -945,7 +1079,11 @@ def _probe_ck_at_delta(seq, delta_extra):
     Returns
     -------
     f, g : complex
-        Final Cayley-Klein amplitudes of the probe subspace.
+        Final Cayley-Klein amplitudes of the probe subspace (SU(2) part).
+    probe_global_phase : complex
+        Accumulated global phase exp(-i * sum_j delta_j * tau_j / 2) from the
+        delta * |e><e| Hamiltonian.  Multiply probe-subspace amplitudes by this
+        factor when computing expectation values in the three-level system.
     """
     # Local imports to avoid circular dependencies
     from quantum_pulse_suite.core.multilevel import (
@@ -956,6 +1094,7 @@ def _probe_ck_at_delta(seq, delta_extra):
     )
 
     f, g = 1.0 + 0j, 0.0 + 0j
+    probe_global_phase = 1.0 + 0j   # accumulates exp(-i delta tau/2) per segment
 
     for element in seq.elements:
 
@@ -963,10 +1102,12 @@ def _probe_ck_at_delta(seq, delta_extra):
         if isinstance(element, (MultiLevelFreeEvolution, FreeEvolution)):
             delta_total = element.delta + delta_extra
             tau = element.tau
-            # U_free = diag(exp(+i delta_total tau/2),  exp(-i delta_total tau/2))
-            # Both f and g pick up the same phase factor (see compute_polynomials):
+            # SU(2) part of delta*|e><e|: diag(exp(+i d tau/2), exp(-i d tau/2))
+            # Both f and g pick up the same phase factor:
             phase = np.exp(1j * delta_total * tau / 2)
             f, g = phase * f, phase * g
+            # Global phase: delta*|e><e| = SU(2) part * exp(-i delta tau/2)
+            probe_global_phase *= np.exp(-1j * delta_total * tau / 2)
 
         # ── Instantaneous pulse ──────────────────────────────────────────────
         elif isinstance(element, (MultiLevelInstantPulse, InstantaneousPulse)):
@@ -1006,8 +1147,10 @@ def _probe_ck_at_delta(seq, delta_extra):
             f_new = diag * f + (-n_x + 1j * n_y) * off * np.conj(g)
             g_new = (n_x - 1j * n_y) * off * np.conj(f) + diag * g
             f, g = f_new, g_new
+            # Global phase: delta*|e><e| = SU(2) part * exp(-i delta tau/2)
+            probe_global_phase *= np.exp(-1j * delta_total * tau / 2)
 
-    return f, g
+    return f, g, probe_global_phase
 
 
 def detuning_sensitivity(seq, M=None, psi0=None, delta=0.0, eps=1e-7):
@@ -1015,7 +1158,11 @@ def detuning_sensitivity(seq, M=None, psi0=None, delta=0.0, eps=1e-7):
     Compute |partial_delta <M>|^2 for a three-level clock sequence.
 
     The laser detuning delta shifts ALL segments uniformly via
-        H_delta = delta/2 * (|e><e| - |g><g|).
+        H_delta = delta * |e><e|.
+    This is equivalent to the traceless probe-subspace form delta/2*(|e><e|-|g><g|)
+    plus a global probe phase exp(-i delta tau/2) per segment, which matters
+    because the clock state |m> is not part of the probe subspace and therefore
+    does not acquire this phase.
     The sensitivity at the chosen operating point is found by central
     finite differences on the exact CK propagator:
         partial_delta <M> approx (<M>(delta+eps) - <M>(delta-eps)) / (2 eps).
@@ -1063,10 +1210,12 @@ def detuning_sensitivity(seq, M=None, psi0=None, delta=0.0, eps=1e-7):
         M = np.asarray(M, dtype=complex)
 
     def expectation(delta_extra):
-        f, g = _probe_ck_at_delta(seq, delta_extra)
+        f, g, probe_phase = _probe_ck_at_delta(seq, delta_extra)
         psi_f = np.empty(d, dtype=complex)
-        psi_f[i_g] = f               * psi0[i_g] + 1j * g           * psi0[i_e]
-        psi_f[i_e] = 1j * np.conj(g) * psi0[i_g] + np.conj(f)       * psi0[i_e]
+        # Apply global probe phase: H_delta = delta*|e><e| shifts only |e>,
+        # so the probe subspace picks up exp(-i delta tau/2) relative to |m>.
+        psi_f[i_g] = probe_phase * (f               * psi0[i_g] + 1j * g     * psi0[i_e])
+        psi_f[i_e] = probe_phase * (1j * np.conj(g) * psi0[i_g] + np.conj(f) * psi0[i_e])
         psi_f[i_m] = psi0[i_m]
         return float(np.real(psi_f.conj() @ M @ psi_f))
 
@@ -1113,7 +1262,7 @@ def detuning_sensitivity_2level(seq, m_hat=None, r0=None, delta=0.0, eps=1e-7):
     r0    = np.asarray(r0,    dtype=float)
 
     def expectation(delta_extra):
-        f, g = _probe_ck_at_delta(seq, delta_extra)
+        f, g, _ = _probe_ck_at_delta(seq, delta_extra)
         # SU(2) → SO(3): U^dag sigma_j U = sum_k R_jk sigma_k
         a, b = np.real(f), np.imag(f)
         c, d_g = np.real(g), np.imag(g)
@@ -1128,7 +1277,516 @@ def detuning_sensitivity_2level(seq, m_hat=None, r0=None, delta=0.0, eps=1e-7):
     return dM_ddelta, dM_ddelta ** 2
 
 
-def three_level_noise_variance(Fe, Ff, frequencies, S_e, S_f):
+def _I_exp_local(omega, tau):
+    """Analytic integral int_0^tau exp(-i*omega*s) ds.
+
+    = (1 - exp(-i*omega*tau)) / (i*omega),  with limit tau as omega -> 0.
+    """
+    omega = np.asarray(omega, dtype=float)
+    result = np.zeros(len(omega), dtype=complex)
+    small = np.abs(omega) < 1e-12
+    large = ~small
+    result[small] = tau
+    result[large] = (1.0 - np.exp(-1j * omega[large] * tau)) / (1j * omega[large])
+    return result
+
+
+def _I_cos_local(omega, Omega, tau):
+    """Analytic integral int_0^tau cos(Omega*s) * exp(-i*omega*s) ds.
+
+    = (1/2) * [I_exp_local(omega - Omega, tau) + I_exp_local(omega + Omega, tau)]
+    """
+    return 0.5 * (_I_exp_local(omega - Omega, tau) + _I_exp_local(omega + Omega, tau))
+
+
+def _I_sin_local(omega, Omega, tau):
+    """Analytic integral int_0^tau sin(Omega*s) * exp(-i*omega*s) ds.
+
+    = (1/2i) * [I_exp_local(omega - Omega, tau) - I_exp_local(omega + Omega, tau)]
+    """
+    return 0.5j * (_I_exp_local(omega + Omega, tau) - _I_exp_local(omega - Omega, tau))
+
+
+def analytic_filter(seq, omega_array, m_y=1.0):
+    """
+    Compute Fe(omega) via exact analytic Fourier integrals of the QSP recurrences.
+
+    Uses the closed-form expressions for phi_j(s) = F_j*(s)*G_j(s) and
+    chi_j(s) = |G_j(s)|^2 within each segment, derived from the recurrence
+    relations:
+
+      Equiangular (continuous drive, n_z=0, delta=0), with a = f_{j-1}, b = g_{j-1},
+      phi_drive = arctan2(n_y, n_x):
+
+          phi_j(s) = conj(a)*b * cos(Omega*s)
+                   + [exp(-i*phi)*conj(a)^2 - exp(+i*phi)*b^2]/2 * sin(Omega*s)
+
+          chi_j(s) = 1/2 + (|b|^2-|a|^2)/2 * cos(Omega*s)
+                   + Re[exp(+i*phi)*a*b] * sin(Omega*s)
+
+      Pulsed QSP free evolution (Omega=0, delta=0): phi_j and chi_j are
+      *constant* (the detuning phase cancels in F*G):
+
+          phi_j(s) = conj(a)*b
+          chi_j(s) = |b|^2
+
+    Both cases unify to the same formulas with Omega=0 for free evolution.
+    The Fourier integrals are evaluated exactly using I_cos, I_sin, I_exp
+    (see _I_cos_local, _I_sin_local, _I_exp_local).
+
+    Valid for any frequency grid, produces smooth curves on dense log-spaced
+    grids extending to arbitrarily low frequency.
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+    omega_array : array_like
+        Frequencies at which to evaluate Fe (can be log-spaced).
+    m_y : float
+        y-component of measurement direction (typically 1.0).
+
+    Returns
+    -------
+    omega_array : np.ndarray
+    Fe : np.ndarray
+        e-noise filter function Fe = m_y^2*|Chi|^2.
+    """
+    from .multilevel import (
+        MultiLevelFreeEvolution,
+        MultiLevelContinuousPulse,
+        MultiLevelInstantPulse,
+    )
+
+    omega_array = np.asarray(omega_array, dtype=float)
+    n_w = len(omega_array)
+    Phi = np.zeros(n_w, dtype=complex)
+    Chi = np.zeros(n_w, dtype=complex)
+
+    a = 1.0 + 0j   # f_{j-1}
+    b = 0.0 + 0j   # g_{j-1}
+    t_start = 0.0
+
+    for elem in seq.elements:
+        if isinstance(elem, MultiLevelInstantPulse):
+            # Zero-duration: update CK amplitudes, no Fourier contribution.
+            theta = elem.angle
+            c_h, s_h = np.cos(theta / 2), np.sin(theta / 2)
+            axis = elem.axis
+            if np.allclose(axis, [1, 0, 0]):
+                a, b = (a * c_h - np.conj(b) * s_h,
+                        b * c_h + np.conj(a) * s_h)
+            elif np.allclose(axis, [0, 1, 0]):
+                a, b = (a * c_h - 1j * np.conj(b) * s_h,
+                        b * c_h + 1j * np.conj(a) * s_h)
+            else:
+                U = elem.subspace_unitary()
+                a, b = (U[0, 0] * a + U[0, 1] / 1j * np.conj(b),
+                        U[1, 0] / 1j * np.conj(a) + U[1, 1] * b)
+
+        elif isinstance(elem, MultiLevelFreeEvolution):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            # Omega=0: phi_j = conj(a)*b (constant), chi_j = |b|^2 (constant).
+            # Unified formula with Omega=0: I_cos(w,0,tau)=I_exp(w,tau), I_sin=0.
+            phase = np.exp(-1j * omega_array * t_start)
+            I_e = _I_exp_local(omega_array, tau)
+            Phi += phase * np.conj(a) * b * I_e
+            Chi += phase * (abs(b) ** 2) * I_e
+            # CK amplitudes unchanged for delta=0; phase factor if delta != 0.
+            delta = elem.delta
+            if abs(delta) > 1e-15:
+                ph = np.exp(1j * delta * tau / 2)
+                a, b = ph * a, ph * b
+            t_start += tau
+
+        elif isinstance(elem, MultiLevelContinuousPulse):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            Omega = elem.omega
+            n_x, n_y, n_z = elem.axis
+            delta = elem.delta
+
+            if abs(n_z) < 1e-12 and abs(delta) < 1e-12:
+                # Pure xy-plane drive, no detuning: exact analytic formulas.
+                phi_d = np.arctan2(n_y, n_x)          # drive phase
+                ep = np.exp(-1j * phi_d)               # e^{-i*phi}
+                em = np.exp(+1j * phi_d)               # e^{+i*phi}
+
+                # Coefficients for phi_j(s) = P_phi*cos(Omega*s) + Q_phi*sin(Omega*s)
+                P_phi = np.conj(a) * b
+                Q_phi = 0.5 * (ep * np.conj(a) ** 2 - em * b ** 2)
+
+                # Coefficients for chi_j(s) = A*1 + B*cos(Omega*s) + C*sin(Omega*s)
+                A_chi = 0.5 * (abs(a) ** 2 + abs(b) ** 2)   # = 0.5 by normalization
+                B_chi = 0.5 * (abs(b) ** 2 - abs(a) ** 2)
+                C_chi = float(np.real(em * a * b))           # real scalar
+
+                phase = np.exp(-1j * omega_array * t_start)
+                I_c = _I_cos_local(omega_array, Omega, tau)
+                I_s = _I_sin_local(omega_array, Omega, tau)
+                I_e = _I_exp_local(omega_array, tau)
+
+                Phi += phase * (P_phi * I_c + Q_phi * I_s)
+                Chi += phase * (A_chi * I_e + B_chi * I_c + C_chi * I_s)
+
+                # Update CK amplitudes at end of segment.
+                c_h = np.cos(Omega * tau / 2)
+                s_h = np.sin(Omega * tau / 2)
+                a, b = (c_h * a - ep * s_h * np.conj(b),
+                        c_h * b + ep * s_h * np.conj(a))
+
+            else:
+                # General case (n_z != 0 or delta != 0): use dense time sampling.
+                rabi = elem.effective_rabi
+                rz = (delta + n_z * Omega) / rabi
+                rperp_neg = (-n_x + 1j * n_y) * Omega / rabi
+                a0, b0 = a, b
+                t0 = t_start
+                n_local = max(512, int(tau * rabi * 16 / (2 * np.pi)) + 64)
+                ts = np.linspace(0, tau, n_local, endpoint=False)
+                dt = tau / n_local
+                c_r = np.cos(rabi * ts / 2)
+                s_r = np.sin(rabi * ts / 2)
+                F_s = (c_r + 1j * rz * s_r) * a0 + rperp_neg * s_r * np.conj(b0)
+                G_s = np.conj(rperp_neg) * s_r * np.conj(a0) + (c_r + 1j * rz * s_r) * b0
+                phi_s = np.conj(F_s) * G_s
+                chi_s = np.abs(G_s) ** 2
+                phas = np.exp(-1j * np.outer(omega_array, t0 + ts))
+                Phi += (phas @ phi_s) * dt
+                Chi += (phas @ chi_s) * dt
+                # Update CK amplitudes via subspace unitary.
+                U = elem.subspace_unitary()
+                a, b = (U[0, 0] * a + U[0, 1] / 1j * np.conj(b),
+                        U[1, 0] / 1j * np.conj(a) + U[1, 1] * b)
+
+            t_start += tau
+
+    Fe = m_y ** 2 * np.abs(Chi) ** 2
+    return omega_array, Fe
+
+
+def raised_cosine_filter(seq, omega_array, m_y=1.0, n_per_segment=1024):
+    """
+    Compute Fe(omega) for a raised-cosine Rabi envelope version of seq.
+
+    Each continuous drive segment j is reshaped from a square (constant Ω)
+    pulse to a raised-cosine envelope with the **same total rotation angle**
+    Θ_j = Ω_j * τ_j::
+
+        Ω_j(t) = (Θ_j / τ_j) * [1 − cos(2π(t−t_{j−1})/τ_j)]
+
+    so the mean Rabi frequency equals the original Ω_j and the CK amplitudes
+    at segment boundaries are **identical** to those of the square-pulse
+    sequence (the signal slope is preserved).
+
+    Free-evolution and instant-pulse elements are unchanged.
+
+    Implementation: dense midpoint-quadrature with ``n_per_segment`` points.
+    For validation of the Jacobi–Anger closed form, see
+    ``raised_cosine_filter_analytic``.
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+    omega_array : array_like
+    m_y : float
+    n_per_segment : int
+        Number of quadrature points per continuous-drive segment (default 1024).
+
+    Returns
+    -------
+    omega_array : np.ndarray
+    Fe : np.ndarray
+    """
+    from .multilevel import (
+        MultiLevelFreeEvolution,
+        MultiLevelContinuousPulse,
+        MultiLevelInstantPulse,
+    )
+
+    omega_array = np.asarray(omega_array, dtype=float)
+    n_w = len(omega_array)
+    Phi = np.zeros(n_w, dtype=complex)
+    Chi = np.zeros(n_w, dtype=complex)
+
+    a = 1.0 + 0j   # f_{j-1}
+    b = 0.0 + 0j   # g_{j-1}
+    t_start = 0.0
+
+    for elem in seq.elements:
+        if isinstance(elem, MultiLevelInstantPulse):
+            theta = elem.angle
+            c_h, s_h = np.cos(theta / 2), np.sin(theta / 2)
+            axis = elem.axis
+            if np.allclose(axis, [1, 0, 0]):
+                a, b = (a * c_h - np.conj(b) * s_h,
+                        b * c_h + np.conj(a) * s_h)
+            elif np.allclose(axis, [0, 1, 0]):
+                a, b = (a * c_h - 1j * np.conj(b) * s_h,
+                        b * c_h + 1j * np.conj(a) * s_h)
+            else:
+                U = elem.subspace_unitary()
+                a, b = (U[0, 0] * a + U[0, 1] / 1j * np.conj(b),
+                        U[1, 0] / 1j * np.conj(a) + U[1, 1] * b)
+
+        elif isinstance(elem, MultiLevelFreeEvolution):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            phase = np.exp(-1j * omega_array * t_start)
+            I_e = _I_exp_local(omega_array, tau)
+            Phi += phase * np.conj(a) * b * I_e
+            Chi += phase * (abs(b) ** 2) * I_e
+            delta = elem.delta
+            if abs(delta) > 1e-15:
+                ph = np.exp(1j * delta * tau / 2)
+                a, b = ph * a, ph * b
+            t_start += tau
+
+        elif isinstance(elem, MultiLevelContinuousPulse):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            n_x, n_y, _ = elem.axis
+            phi_d = np.arctan2(n_y, n_x)
+            ep = np.exp(-1j * phi_d)   # e^{-i*phi_d}
+            Omega_mean = elem.omega    # original (mean) Rabi frequency
+            # Total rotation angle: Θ = Ω_mean * τ  (same for square and RC)
+
+            # Midpoint quadrature over [0, τ]
+            n_pts = n_per_segment
+            ts = (np.arange(n_pts) + 0.5) * (tau / n_pts)   # midpoints
+            dt = tau / n_pts
+
+            # Raised-cosine cumulative area:
+            #   h(s) = (Θ/τ)*s  −  (Θ/2π)*sin(2π*s/τ)
+            # ∫_0^τ h'(s) ds = Θ  (total rotation preserved)
+            Theta = Omega_mean * tau
+            hs = Omega_mean * ts - (Theta / (2.0 * np.pi)) * np.sin(2.0 * np.pi * ts / tau)
+
+            # CK amplitudes at local time s, starting from (a, b):
+            #   F(s) = cos(h/2)*a − e^{-iφ}*sin(h/2)*conj(b)
+            #   G(s) = cos(h/2)*b + e^{+iφ}*sin(h/2)*conj(a)
+            c_hs = np.cos(hs / 2.0)
+            s_hs = np.sin(hs / 2.0)
+            F_s = c_hs * a - ep * s_hs * np.conj(b)
+            G_s = c_hs * b + ep * s_hs * np.conj(a)
+
+            phi_s = np.conj(F_s) * G_s    # F*(s)*G(s)
+            chi_s = np.abs(G_s) ** 2      # |G(s)|^2
+
+            # Contribution to Phi and Chi
+            phas = np.exp(-1j * np.outer(omega_array, t_start + ts))
+            Phi += (phas @ phi_s) * dt
+            Chi += (phas @ chi_s) * dt
+
+            # End-of-segment CK update: h(τ) = Θ (sin(2π) = 0)
+            c_end = np.cos(Theta / 2.0)
+            s_end = np.sin(Theta / 2.0)
+            a, b = (c_end * a - ep * s_end * np.conj(b),
+                    c_end * b + ep * s_end * np.conj(a))
+
+            t_start += tau
+
+    Fe = m_y ** 2 * np.abs(Chi) ** 2
+    return omega_array, Fe
+
+
+def _jacobi_anger_integrals(Theta, tau, omega_array, n_terms=30):
+    """
+    Jacobi–Anger analytic integrals for the raised-cosine envelope.
+
+    Computes the complex integral
+
+        Ĩ_c(ω) + i*Ĩ_s(ω)  =  ∫_0^τ exp(i*h(s)) * exp(−iωs) ds
+
+    where h(s) = (Θ/τ)s − (Θ/2π)*sin(2πs/τ) is the raised-cosine
+    cumulative area, using the Jacobi–Anger expansion
+
+        exp(−iz·sin(ψ)) = Σ_n  J_n(z) * exp(−inψ)
+
+    to give (paper Eq. JA_result):
+
+        Ĩ_c + i·Ĩ_s = τ * Σ_n  J_n(Θ/2π) * sinc(ξ_n) * exp(i*ξ_n)
+
+    where  ξ_n = [(Θ/2π − n)*π − ω*τ/2].
+
+    The sum is truncated at |n| ≤ n_terms (Bessel functions decay super-
+    exponentially once |n| ≫ |Θ/2π|).
+
+    Parameters
+    ----------
+    Theta : float
+        Total rotation angle of the segment.
+    tau : float
+        Segment duration.
+    omega_array : np.ndarray, shape (n_w,)
+    n_terms : int
+        Truncation order for the Bessel series.
+
+    Returns
+    -------
+    I_cs : np.ndarray, shape (n_w,), complex
+        Ĩ_c(ω) + i*Ĩ_s(ω) at each frequency.
+    """
+    from scipy.special import jn
+
+    omega_array = np.asarray(omega_array, dtype=float)
+    z = Theta / (2.0 * np.pi)     # argument of Bessel functions
+    ns = np.arange(-n_terms, n_terms + 1)   # integers summed over
+
+    # ξ_n = (z − n)*π − ω*τ/2,  shape (n_terms, n_w)
+    xi = (z - ns[:, None]) * np.pi - 0.5 * tau * omega_array[None, :]   # (2n+1, n_w)
+
+    # sinc with limit: sin(x)/x → 1 as x → 0
+    with np.errstate(invalid='ignore', divide='ignore'):
+        sinc_xi = np.where(np.abs(xi) < 1e-14, 1.0, np.sin(xi) / xi)
+
+    # Bessel coefficients: J_n(z), shape (2n+1,)
+    Jn = np.array([jn(int(n), z) for n in ns], dtype=float)
+
+    # Sum: τ * Σ_n J_n(z) * sinc(ξ_n) * exp(i*ξ_n)
+    I_cs = tau * np.sum(Jn[:, None] * sinc_xi * np.exp(1j * xi), axis=0)
+    return I_cs
+
+
+def raised_cosine_filter_analytic(seq, omega_array, m_y=1.0,
+                                   n_terms=30, n_chi_pts=512):
+    """
+    Compute Fe(omega) for raised-cosine envelopes using the Jacobi–Anger
+    analytic formula for the probe channel Φ(ω), and dense quadrature for
+    the clock channel χ(ω).
+
+    This implements Eq. (JA_result) from the paper (Sec.~\\ref{sec:pulseshaping})
+    for the probe contribution, and validates it against ``raised_cosine_filter``
+    (which uses pure quadrature throughout).
+
+    Parameters
+    ----------
+    seq : MultiLevelPulseSequence
+    omega_array : array_like
+    m_y : float
+    n_terms : int
+        Bessel truncation order for Jacobi–Anger (default 30).
+    n_chi_pts : int
+        Quadrature points per segment for the clock-channel integral (default 512).
+
+    Returns
+    -------
+    omega_array : np.ndarray
+    Fe : np.ndarray
+    Phi : np.ndarray, complex
+        Probe path-function integral (useful for validation).
+    Chi : np.ndarray, complex
+        Clock channel integral (useful for validation).
+    """
+    from .multilevel import (
+        MultiLevelFreeEvolution,
+        MultiLevelContinuousPulse,
+        MultiLevelInstantPulse,
+    )
+
+    omega_array = np.asarray(omega_array, dtype=float)
+    n_w = len(omega_array)
+    Phi = np.zeros(n_w, dtype=complex)
+    Chi = np.zeros(n_w, dtype=complex)
+
+    a = 1.0 + 0j
+    b = 0.0 + 0j
+    t_start = 0.0
+
+    for elem in seq.elements:
+        if isinstance(elem, MultiLevelInstantPulse):
+            theta = elem.angle
+            c_h, s_h = np.cos(theta / 2), np.sin(theta / 2)
+            axis = elem.axis
+            if np.allclose(axis, [1, 0, 0]):
+                a, b = (a * c_h - np.conj(b) * s_h,
+                        b * c_h + np.conj(a) * s_h)
+            elif np.allclose(axis, [0, 1, 0]):
+                a, b = (a * c_h - 1j * np.conj(b) * s_h,
+                        b * c_h + 1j * np.conj(a) * s_h)
+            else:
+                U = elem.subspace_unitary()
+                a, b = (U[0, 0] * a + U[0, 1] / 1j * np.conj(b),
+                        U[1, 0] / 1j * np.conj(a) + U[1, 1] * b)
+
+        elif isinstance(elem, MultiLevelFreeEvolution):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            phase = np.exp(-1j * omega_array * t_start)
+            I_e = _I_exp_local(omega_array, tau)
+            Phi += phase * np.conj(a) * b * I_e
+            Chi += phase * (abs(b) ** 2) * I_e
+            delta = elem.delta
+            if abs(delta) > 1e-15:
+                ph = np.exp(1j * delta * tau / 2)
+                a, b = ph * a, ph * b
+            t_start += tau
+
+        elif isinstance(elem, MultiLevelContinuousPulse):
+            tau = elem.tau
+            if tau < 1e-15:
+                continue
+            n_x, n_y, _ = elem.axis
+            phi_d = np.arctan2(n_y, n_x)
+            ep = np.exp(-1j * phi_d)
+            Omega_mean = elem.omega
+            Theta = Omega_mean * tau
+
+            phase = np.exp(-1j * omega_array * t_start)
+
+            # ── Probe channel: Jacobi–Anger analytic formula ─────────────────
+            # The path function within segment j is:
+            #   φ_j(s) = P_phi * cos(h(s)) + Q_phi * sin(h(s))
+            # so its Fourier contribution is:
+            #   Φ_j(ω) = phase * [P_phi * Ĩ_c(ω) + Q_phi * Ĩ_s(ω)]
+            # where Ĩ_c = ∫ cos(h) e^{-iωs} ds and Ĩ_s = ∫ sin(h) e^{-iωs} ds.
+            #
+            # The Jacobi–Anger expansion gives:
+            #   I_cs_pos = ∫ e^{+ih(s)} e^{-iωs} ds  = Ĩ_c + i*Ĩ_s
+            #   I_cs_neg = ∫ e^{-ih(s)} e^{-iωs} ds  = Ĩ_c - i*Ĩ_s
+            # so:
+            #   Ĩ_c = (I_cs_pos + I_cs_neg) / 2
+            #   Ĩ_s = (I_cs_pos - I_cs_neg) / (2i)
+            # which gives the compact form:
+            #   P*Ĩ_c + Q*Ĩ_s = (P - iQ)/2 * I_cs_pos + (P + iQ)/2 * I_cs_neg
+            I_cs_pos = _jacobi_anger_integrals( Theta, tau, omega_array, n_terms)
+            I_cs_neg = _jacobi_anger_integrals(-Theta, tau, omega_array, n_terms)
+
+            P_phi = np.conj(a) * b
+            Q_phi = 0.5 * (ep * np.conj(a) ** 2 - np.conj(ep) * b ** 2)
+            Phi += phase * (0.5 * (P_phi - 1j * Q_phi) * I_cs_pos
+                          + 0.5 * (P_phi + 1j * Q_phi) * I_cs_neg)
+
+            # ── Clock channel: dense quadrature ───────────────────────────────
+            ts = (np.arange(n_chi_pts) + 0.5) * (tau / n_chi_pts)
+            dt = tau / n_chi_pts
+            hs = Omega_mean * ts - (Theta / (2.0 * np.pi)) * np.sin(2.0 * np.pi * ts / tau)
+            c_hs = np.cos(hs / 2.0)
+            s_hs = np.sin(hs / 2.0)
+            G_s = c_hs * b + ep * s_hs * np.conj(a)
+            chi_s = np.abs(G_s) ** 2
+            phas = np.exp(-1j * np.outer(omega_array, t_start + ts))
+            Chi += (phas @ chi_s) * dt
+
+            # ── End-of-segment CK update ──────────────────────────────────────
+            c_end = np.cos(Theta / 2.0)
+            s_end = np.sin(Theta / 2.0)
+            a, b = (c_end * a - ep * s_end * np.conj(b),
+                    c_end * b + ep * s_end * np.conj(a))
+
+            t_start += tau
+
+    Fe = m_y ** 2 * np.abs(Chi) ** 2
+    return omega_array, Fe, Phi, Chi
+
+
+def three_level_noise_variance(Fe, Ff, frequencies, S_e, S_f,
+                               omega_cutoff=None, T=None):
     """
     Compute total noise variance <dM^2> from filter functions and PSDs.
 
@@ -1147,6 +1805,14 @@ def three_level_noise_variance(Fe, Ff, frequencies, S_e, S_f):
     S_f : callable or np.ndarray
         Noise PSD for beta_f. If callable, evaluated at frequencies.
 
+    omega_cutoff : float or None, optional
+        Lower integration cutoff in angular-frequency units.  If None and
+        ``T`` is provided, uses the Fourier limit 2*pi/T.  If both are None,
+        integrates over the full supplied grid.
+    T : float or None, optional
+        Sequence duration used to resolve the default cutoff when
+        ``omega_cutoff`` is None.
+
     Returns
     -------
     float
@@ -1157,5 +1823,9 @@ def three_level_noise_variance(Fe, Ff, frequencies, S_e, S_f):
     Se_vals = S_e(w) if callable(S_e) else np.asarray(S_e)
     Sf_vals = S_f(w) if callable(S_f) else np.asarray(S_f)
 
+    omega_min = resolve_omega_cutoff(T, omega_cutoff) if T is not None or omega_cutoff is not None else 0.0
+    mask = w >= omega_min
+    if np.count_nonzero(mask) < 2:
+        return 0.0
     integrand = Se_vals * Fe + Sf_vals * Ff
-    return float(simpson(integrand, x=w) / (2 * np.pi))
+    return float(simpson(integrand[mask], x=w[mask]) / (2 * np.pi))

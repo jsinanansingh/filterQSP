@@ -16,10 +16,9 @@ Three separate figures:
 
   Figure 3 (comparison):  kubo_filter_3level_analytic  vs  analytic_three_level_filter
     Overlays per protocol:
-      solid  — full Fe(ω) from analytic_three_level_filter (m_y=1, m_x=m_z=0)
-               = ½|Φ(ω)|² + |Chi(ω)|²
-      dashed — simplified Kubo  m_y²|Chi(ω)|²  (Chi term only)
-    Difference reveals the ½|Φ|² contribution absent from the Kubo approximation.
+      solid  — Fe(ω) from analytic_three_level_filter (m_y=1)
+      dashed — kubo_filter_3level_analytic(ω)
+    In the updated model these should coincide: both equal |Chi(ω)|².
 
   Figure 4 (2-level comparison):  kubo_filter_2level_full_analytic
     Overlays per protocol:
@@ -192,7 +191,7 @@ def main():
         print(f"Saved: {path}")
 
     # ── Figure 3: Kubo vs full Fe comparison ──────────────────────────────
-    print("Computing Kubo vs full Fe comparison...")
+    print("Computing Kubo vs Fe comparison...")
     fig_cmp, ax_cmp = plt.subplots(figsize=FIGURE_SIZE)
 
     for (color, label), s3 in zip(PROTOCOLS, seqs3):
@@ -207,8 +206,8 @@ def main():
     # Legend: protocol colours (solid proxy) + linestyle guide
     from matplotlib.lines import Line2D
     style_handles = [
-        Line2D([0], [0], color='k', lw=2,   ls='-',  label=r'Full $F_e$ ($\frac{1}{2}|\Phi|^2 + |\chi|^2$)'),
-        Line2D([0], [0], color='k', lw=1.5, ls='--', label=r'Kubo $m_y^2|\chi|^2$'),
+        Line2D([0], [0], color='k', lw=2,   ls='-',  label=r'$F_e = |\chi|^2$'),
+        Line2D([0], [0], color='k', lw=1.5, ls='--', label=r'Kubo $|\chi|^2$'),
     ]
     proto_legend = ax_cmp.legend(fontsize=9, loc='lower left')
     ax_cmp.add_artist(proto_legend)
@@ -217,9 +216,8 @@ def main():
     ax_cmp.set_xlabel(r'$\omega$ (rad/s)', fontsize=12)
     ax_cmp.set_ylabel(r'$F(\omega) / T^2$', fontsize=12)
     ax_cmp.set_title(
-        r'Full $F_e$ (solid) vs Kubo $m_y^2|\chi|^2$ (dashed), $m_y=1$'
-        '\n'
-        r'Difference $= \frac{1}{2}|\Phi(\omega)|^2$', fontsize=11)
+        r'Three-level consistency check: $F_e$ (solid) vs Kubo $|\chi|^2$ (dashed), $m_y=1$',
+        fontsize=11)
     ax_cmp.set_xlim([FREQ_MIN, FREQ_MAX])
     ax_cmp.grid(True, alpha=0.3, which='both')
     fig_cmp.tight_layout()

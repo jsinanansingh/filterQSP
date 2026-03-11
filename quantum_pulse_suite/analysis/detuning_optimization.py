@@ -16,6 +16,8 @@ from collections import namedtuple
 from scipy.integrate import simpson
 from scipy.optimize import minimize_scalar
 
+from ..core.three_level_filter import resolve_omega_cutoff
+
 
 OptimizationResult = namedtuple('OptimizationResult', ['delta_opt', 'min_variance'])
 
@@ -66,7 +68,7 @@ def compute_signal(seq, B_lab):
     return float(B_lab @ _bloch_vector(seq))
 
 
-def compute_noise_variance(seq, frequencies, S_func, B_lab):
+def compute_noise_variance(seq, frequencies, S_func, B_lab, omega_cutoff=None):
     """
     Compute noise variance ⟨δ(B_lab·σ)²⟩ via the Kubo formula.
 
@@ -85,6 +87,11 @@ def compute_noise_variance(seq, frequencies, S_func, B_lab):
     B_lab : array_like, shape (3,)
         Lab-frame measurement axis.
 
+    omega_cutoff : float or None, optional
+        Lower integration cutoff in angular-frequency units.  If None, uses
+        the Fourier limit 2*pi/T of the supplied sequence.  Set to 0.0 to
+        integrate from DC.
+
     Returns
     -------
     float
@@ -99,7 +106,11 @@ def compute_noise_variance(seq, frequencies, S_func, B_lab):
     F_sq = np.abs(Fx)**2 + np.abs(Fy)**2 + np.abs(Fz)**2
     BdotF = B[0]*Fx + B[1]*Fy + B[2]*Fz
     sens = np.maximum(F_sq - np.abs(BdotF)**2, 0.0)
-    return float(2 * simpson(S_func(frequencies) * sens, x=frequencies) / np.pi)
+    omega_lo = resolve_omega_cutoff(seq.total_duration(), omega_cutoff)
+    mask = frequencies >= omega_lo
+    if np.count_nonzero(mask) < 2:
+        return np.inf
+    return float(2 * simpson(S_func(frequencies[mask]) * sens[mask], x=frequencies[mask]) / np.pi)
 
 
 def compute_signal_slope(seq_builder, delta, B_lab, eps=1e-6):
@@ -135,7 +146,7 @@ def _bloch_gradient(seq_builder, delta, eps=1e-6):
 
 
 def frequency_estimation_variance(seq_builder, delta, frequencies, S_func,
-                                  B_lab=None, eps=1e-6):
+                                  B_lab=None, eps=1e-6, omega_cutoff=None):
     """
     Compute frequency estimation variance σ²_freq = ⟨δσ²⟩ / |∂⟨σ⟩/∂δ|².
 
@@ -170,11 +181,13 @@ def frequency_estimation_variance(seq_builder, delta, frequencies, S_func,
             return np.inf
         B_opt = dr / slope_mag
         seq = seq_builder(delta)
-        noise_var = compute_noise_variance(seq, frequencies, S_func, B_opt)
+        noise_var = compute_noise_variance(seq, frequencies, S_func, B_opt,
+                                           omega_cutoff=omega_cutoff)
         return noise_var / slope_mag**2
     else:
         seq = seq_builder(delta)
-        noise_var = compute_noise_variance(seq, frequencies, S_func, B_lab)
+        noise_var = compute_noise_variance(seq, frequencies, S_func, B_lab,
+                                           omega_cutoff=omega_cutoff)
         slope = compute_signal_slope(seq_builder, delta, B_lab, eps)
         if abs(slope) < 1e-12:
             return np.inf
@@ -182,7 +195,8 @@ def frequency_estimation_variance(seq_builder, delta, frequencies, S_func,
 
 
 def optimize_detuning(seq_builder, frequencies, S_func, B_lab=None,
-                      delta_range=(0.01, 5.0), n_grid=200):
+                      delta_range=(0.01, 5.0), n_grid=200,
+                      omega_cutoff=None):
     """
     Find the detuning that minimizes frequency estimation variance.
 
@@ -240,7 +254,8 @@ def optimize_detuning(seq_builder, frequencies, S_func, B_lab=None,
                 continue
             B_opt = dr_ddelta[i] / slope_mags[i]
             noise_vars[i] = compute_noise_variance(
-                seqs[i], frequencies, S_func, B_opt)
+                seqs[i], frequencies, S_func, B_opt,
+                omega_cutoff=omega_cutoff)
 
         with np.errstate(divide='ignore', invalid='ignore'):
             variances = np.where(
@@ -256,7 +271,8 @@ def optimize_detuning(seq_builder, frequencies, S_func, B_lab=None,
             seq = seq_builder(d)
             signals[i] = compute_signal(seq, B_lab)
             noise_vars[i] = compute_noise_variance(
-                seq, frequencies, S_func, B_lab)
+                seq, frequencies, S_func, B_lab,
+                omega_cutoff=omega_cutoff)
 
         slopes = np.gradient(signals, deltas)
         with np.errstate(divide='ignore', invalid='ignore'):
@@ -282,7 +298,8 @@ def optimize_detuning(seq_builder, frequencies, S_func, B_lab=None,
     try:
         result = minimize_scalar(
             lambda d: frequency_estimation_variance(
-                seq_builder, d, frequencies, S_func, B_lab),
+                seq_builder, d, frequencies, S_func, B_lab,
+                omega_cutoff=omega_cutoff),
             bounds=(bracket_lo, bracket_hi),
             method='bounded',
             options={'xatol': 1e-6, 'maxiter': 30}

@@ -181,17 +181,17 @@ class TestGPSFilterFunction(unittest.TestCase):
             self.assertTrue(np.all(ff_sq >= -1e-10),
                            f"Negative values for measurement {meas_type}")
 
-    def test_filter_function_z_measurement(self):
-        """Test filter function for sigma_z measurement."""
+    def test_filter_function_y_measurement(self):
+        """Test filter function for sigma_y measurement."""
         gps = GlobalPhaseSpectroscopySequence(
             self.system, n_cycles=5, omega=self.omega
         )
         ff = gps.get_filter_function_calculator()
 
-        ff_z = ff.filter_function_for_measurement(self.frequencies, 'z')
+        ff_y = ff.filter_function_for_measurement(self.frequencies, 'y')
 
         # Should have some structure (not flat)
-        self.assertGreater(np.std(ff_z), 0)
+        self.assertGreater(np.std(ff_y), 0)
 
     def test_filter_function_x_measurement(self):
         """Test filter function for sigma_x measurement."""
@@ -203,6 +203,7 @@ class TestGPSFilterFunction(unittest.TestCase):
         ff_x = ff.filter_function_for_measurement(self.frequencies, 'x')
 
         self.assertTrue(np.all(np.isfinite(ff_x)))
+        np.testing.assert_allclose(ff_x, 0.0, atol=1e-12)
 
     def test_characteristic_frequencies(self):
         """Test characteristic frequency identification."""
@@ -232,8 +233,8 @@ class TestGPSFilterFunction(unittest.TestCase):
         # Fine frequency grid around Rabi frequency
         freqs_fine = np.linspace(self.omega * 0.5, self.omega * 1.5, 200)
 
-        ff_few_z = ff_few.filter_function_for_measurement(freqs_fine, 'z')
-        ff_many_z = ff_many.filter_function_for_measurement(freqs_fine, 'z')
+        ff_few_z = ff_few.filter_function_for_measurement(freqs_fine, 'y')
+        ff_many_z = ff_many.filter_function_for_measurement(freqs_fine, 'y')
 
         # Normalize by peak
         if np.max(ff_few_z) > 0 and np.max(ff_many_z) > 0:

@@ -96,7 +96,7 @@ def find_optimal_delta(build_func, frequencies,
             return np.inf
         seq = build_func(delta)
         seq.compute_polynomials()
-        _, Fe, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
+        _, Fe, _, _ = analytic_three_level_filter(seq, frequencies, m_y=1.0)
         noise_int = float(np.trapezoid(Fe / frequencies, x=frequencies))
         return noise_int / slope ** 2
 
@@ -123,9 +123,9 @@ def find_optimal_delta(build_func, frequencies,
 # FFT helpers
 # =============================================================================
 
-def _fft_fe_3level(seq, m_z=M_Z_SIGMA_Y):
+def _fft_fe_3level(seq, m_y=1.0):
     """Fe via unitary propagation + FFT (3-level path)."""
-    freqs, Fe, _, _ = fft_three_level_filter(seq, n_samples=N_FFT, m_z=m_z)
+    freqs, Fe, _, _ = fft_three_level_filter(seq, n_samples=N_FFT, m_y=m_y)
     mask = (freqs >= FREQ_MIN) & (freqs <= FREQ_MAX)
     return freqs[mask], Fe[mask]
 
@@ -178,7 +178,7 @@ def main():
 
     seq = multilevel_ramsey(system, system.probe, tau=T_TOTAL, delta=d_ri)
     seq.compute_polynomials()
-    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
+    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_y=1.0)
 
     f3L, Fe3L = _fft_fe_3level(seq)
     f2L, ns2L = _fft_ns_2level(ramsey_sequence(tau=T_TOTAL, delta=d_ri))
@@ -195,7 +195,7 @@ def main():
     seq.add_free_evolution(tau_free, d_rc)
     seq.add_continuous_pulse(OMEGA_FAST, [1, 0, 0], d_rc, tau_pi2)
     seq.compute_polynomials()
-    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
+    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_y=1.0)
 
     f3L, Fe3L = _fft_fe_3level(seq)
     f2L, ns2L = _fft_ns_2level(
@@ -219,7 +219,7 @@ def main():
 
     seq = _build_rabi(d_rabi)
     seq.compute_polynomials()
-    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_z=M_Z_SIGMA_Y)
+    _, Fe_ana, _, _ = analytic_three_level_filter(seq, frequencies, m_y=1.0)
 
     f3L, Fe3L = _fft_fe_3level(seq)
     f2L, ns2L = _fft_ns_2level(
@@ -240,7 +240,7 @@ def main():
             system, n_cycles=n_cyc, omega=omega_gps, delta=0.0)
         gps._sequence.compute_polynomials()
         _, Fe_ana, _, _ = analytic_three_level_filter(
-            gps._sequence, frequencies, m_z=M_Z_SIGMA_Y)
+            gps._sequence, frequencies, m_y=1.0)
 
         f3L, Fe3L = _fft_fe_3level(gps._sequence)
         # 2-level: GPS → continuous Rabi on probe qubit (no |f> reference)

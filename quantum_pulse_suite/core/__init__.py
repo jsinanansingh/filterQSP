@@ -85,6 +85,10 @@ from .three_level_filter import (
     Ff_analytic,
     detuning_sensitivity,
     detuning_sensitivity_2level,
+    analytic_filter,
+    raised_cosine_filter,
+    raised_cosine_filter_analytic,
+    _jacobi_anger_integrals,
 )
 
 from .spin_displacement import (

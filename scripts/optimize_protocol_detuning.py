@@ -41,6 +41,7 @@ from quantum_pulse_suite import (
     noise_susceptibility_from_matrix,
 )
 from quantum_pulse_suite.analysis import optimize_detuning
+from quantum_pulse_suite.core.three_level_filter import default_omega_cutoff
 
 # =============================================================================
 # Configuration (reused from plot_qubit_performance.py)
@@ -95,6 +96,7 @@ OUTPUT_DIR = 'figures/qubit_performance_plots'
 DELTA_RANGE = (0.01, 5.0)
 N_GRID = 200
 OPT_FREQS = np.linspace(0.01, 200, 2000)
+OMEGA_CUTOFF = default_omega_cutoff(T_WALL)
 
 # =============================================================================
 # Noise PSD builders
@@ -181,8 +183,9 @@ def compute_chi(seq, S_func):
     freqs, F_mat = fft_filter_function(
         seq, H_NOISE, n_samples=N_FFT, pad_factor=PAD_FACTOR)
     suscept = noise_susceptibility_from_matrix(F_mat)
-    S_vals = S_func(freqs)
-    return float(2 * simpson(S_vals * suscept, x=freqs) / np.pi)
+    mask = freqs >= OMEGA_CUTOFF
+    S_vals = S_func(freqs[mask])
+    return float(2 * simpson(S_vals * suscept[mask], x=freqs[mask]) / np.pi)
 
 
 def _build_noise_func(noise_idx):
@@ -208,7 +211,8 @@ def _run_one(args):
     S_func = _build_noise_func(ni)
     result = optimize_detuning(
         builder, OPT_FREQS, S_func, B_lab=None,
-        delta_range=DELTA_RANGE, n_grid=N_GRID)
+        delta_range=DELTA_RANGE, n_grid=N_GRID,
+        omega_cutoff=OMEGA_CUTOFF)
     return (typ, n, ni, noise_label, result.delta_opt, result.min_variance)
 
 
@@ -468,7 +472,8 @@ def main():
         chi_vals = np.zeros(n_noise)
         for ni, (noise_label, S_func, _, _) in enumerate(noise_shapes):
             S_vals = S_func(freqs)
-            chi_vals[ni] = float(2 * simpson(S_vals * suscept, x=freqs) / np.pi)
+            mask = freqs >= OMEGA_CUTOFF
+            chi_vals[ni] = float(2 * simpson(S_vals[mask] * suscept[mask], x=freqs[mask]) / np.pi)
 
         chi_baseline[key] = chi_vals
         print(f'  {str(key):<20s}  chi range: [{chi_vals.min():.4e}, {chi_vals.max():.4e}]')

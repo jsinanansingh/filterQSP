@@ -276,8 +276,10 @@ class GPSFilterFunction(SubspaceFilterFunction):
         """
         Compute filter function for a specific clock measurement.
 
-        Delegates to the parent's measurement_sensitivity() which uses
-        the Fe/Phi decomposition for the three-level clock system.
+        Uses the updated three-level clock variance filter.  In the current
+        model only the sigma_y^{gm} component contributes to probe technical
+        noise, so this returns |Chi|^2 for ``measurement_type='y'`` and zero
+        for the orthogonal clock observables.
 
         Parameters
         ----------
@@ -291,20 +293,17 @@ class GPSFilterFunction(SubspaceFilterFunction):
         np.ndarray
             Filter function Fe(omega) for this measurement
         """
-        m_z = self._measurement_type_to_mz(measurement_type)
-        return self.measurement_sensitivity(frequencies, m_z)
+        m_y = self._measurement_type_to_my(measurement_type)
+        return self.measurement_sensitivity(frequencies, m_y=m_y)
 
     @staticmethod
-    def _measurement_type_to_mz(measurement_type: str) -> float:
-        """Map measurement type string to m_z value."""
-        if measurement_type == 'z':
+    def _measurement_type_to_my(measurement_type: str) -> float:
+        """Map measurement type string to the sigma_y^{gm} weight."""
+        if measurement_type == 'y':
             return 1.0
-        elif measurement_type in ('x', 'y'):
+        if measurement_type in ('x', 'z', 'population_g', 'population_m'):
             return 0.0
-        elif measurement_type in ('population_g', 'population_m'):
-            return 1.0
-        else:
-            raise ValueError(f"Unknown measurement type: {measurement_type}")
+        raise ValueError(f"Unknown measurement type: {measurement_type}")
 
     def characteristic_frequencies(self) -> np.ndarray:
         """
