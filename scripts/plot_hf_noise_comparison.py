@@ -33,7 +33,6 @@ from quantum_pulse_suite.core.three_level_filter import (
     fft_three_level_filter,
     detuning_sensitivity,
 )
-from quantum_pulse_suite.analysis.pulse_optimizer import optimize_equiangular_sequence
 
 T          = 2 * np.pi
 OMEGA_FAST = 20 * np.pi
@@ -114,15 +113,15 @@ def main():
     print('Building GPS m=8 (delta=0) ...')
     seq_G8 = build_gps(system, OMEGA_GPS8)
 
-    print('Optimising equiangular N=4 (white noise, seed=7) ...')
-    res_eq4   = optimize_equiangular_sequence(
-        system, T, N=4, noise_psd='white',
-        n_restarts=12, seed=7, n_fft=2048, pad_factor=4,
-        popsize=20, maxiter=500,
-    )
-    omega_eq4  = res_eq4.omega
-    phases_eq4 = res_eq4.phases
-    seq_eq4    = res_eq4.seq
+    print('Loading equiangular N=4 (white noise) from cache ...')
+    eq_caches  = sorted(OUTPUT_DIR.glob('equiangular_opt_cache_*.npz'))
+    if not eq_caches:
+        raise FileNotFoundError(f'No equiangular_opt_cache_*.npz in {OUTPUT_DIR}')
+    eq_cache   = np.load(eq_caches[-1], allow_pickle=True)
+    omega_eq4  = float(eq_cache['eq_N4_white_omega'])
+    phases_eq4 = eq_cache['eq_N4_white_phases']
+    seq_eq4    = build_equiangular(system, omega_eq4, phases_eq4)
+    print(f'  Cache: {eq_caches[-1].name}')
     print(f'  Omega*T = {omega_eq4 * T:.4f},  phases = '
           f'{np.array2string(phases_eq4, precision=3, separator=", ")}')
 

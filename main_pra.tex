@@ -29,6 +29,8 @@
 \newcommand{\placeholder}[1]{{\color{red}\textbf{[PLACEHOLDER: #1]}}}
 \newcommand{\todo}[1]{{\color{blue}\textbf{[TODO: #1]}}}
 
+\newcommand{\LZ}[1]{{\color{green}\textbf{[LZ: #1]}}}
+
 \graphicspath{{figures/qubit_performance_plots/}}
 
 \begin{document}
@@ -36,39 +38,52 @@
 \title{Noise-Resilient Atomic Clocks via Quantum Signal Processing:\\
        Sensitivity, Filtering, and Multilevel Spectroscopy}
 
-\author{Author One}
+\author{Jasmine Sinanan-Singh}
 \affiliation{Department of Physics, Institution A}
-\author{Author Two}
+\author{Leon Zaporski}
+\affiliation{Department of Physics, Institution B}
+\author{Vladan Vuletic}
+\affiliation{Department of Physics, Institution B}
+\author{Isaac L. Chuang}
 \affiliation{Department of Physics, Institution B}
 
 \date{\today}
 
 \begin{abstract}
-We develop a unified analytical framework for characterizing and optimizing atomic clock performance
-under realistic noise environments using Quantum Signal Processing (QSP).
-Clock performance is governed by two competing figures of merit:
-the \emph{frequency sensitivity} $\mathcal{S}^2 = |\partial_\delta\langle M\rangle|^2$,
-which quantifies how steeply the atomic signal discriminates a frequency deviation $\delta$
-from resonance, and the \emph{Kubo noise integral}
-$\mathcal{K}(S_\beta) = \int S_\beta(\omega)\mathcal{F}_e(\omega)\,d\omega/(2\pi)$,
-which measures how strongly the pulse sequence couples to off-resonant technical noise.
-Maximizing clock stability requires simultaneously maximizing $\mathcal{S}^2$ and minimizing
-$\mathcal{K}$, making the figure of merit $\mathrm{FOM}=\mathcal{S}^2/\mathcal{K}$ the central
-optimization target.
-We show that the physically correct laser-detuning Hamiltonian $H_\delta = \delta|e\rangle\langle e|$
-leads to an analytic result: \emph{all} GPS protocols at integer-cycle resonance ($\delta=0$) share
-the same DC sensitivity $|\partial_\delta S|^2 = T^2/4$ as Ramsey, so protocol differences reduce
-entirely to filter-function differences.
-Within the equiangular protocol class (continuous $N$-segment drives), numerical optimization of the
-FOM shows at most $15\%$ improvement over Ramsey for white noise; GPS $m=1$ is nearly optimal
-for band-limited (high-pass) noise environments where its filter function is concentrated below
-the noise cutoff.
-Crucially, pulsed QSP sequences consisting of $n$ fast rotations separated by equal free-evolution
-gaps---analogous to CPMG dynamical-decoupling sequences---achieve $3$--$7\times$ improvement in FOM
-over all continuous-drive protocols for white and $1/f$ noise, by suppressing low-frequency noise
-via partial spin-echo refocusing while maintaining finite sensitivity.
-These results are validated via exact numerical filter-function calculations and establish a
-quantitative hierarchy of clock protocols matched to the noise environment.
+
+We develop a unified framework---temporal Quantum Signal Processing (QSP)---for
+characterizing and optimizing atomic clock protocols under realistic noise environments.
+By extending the QSP polynomial formalism to continuous-time drives, we express the
+per-shot frequency sensitivity and noise filter function for any pulse sequence in
+closed form in terms of a single pair of path amplitudes.
+This framework unifies two-level Ramsey, three-level Global Phase Spectroscopy (GPS),
+equiangular multi-segment drives, and pulsed QSP sequences within a single analytical structure.
+\LZ{It would be good to link FOM to Allan deviation of the clock in some way.}
+
+Using the physically correct laser-detuning Hamiltonian $H_\delta=\delta|e\rangle\langle e|$
+for the three-level $\Lambda$ clock,
+we prove analytically that all GPS protocols at integer-cycle resonance share
+the same DC sensitivity as the three-level Ramsey sequence
+($|\mathcal{S}|^2 = T^2/4$, four times below optimal two-level Ramsey),
+so differences in clock performance arise entirely from the
+noise filter function. \LZ{This result is wrong. Literature already knows of Rabi being worse than Ramsey by factor 2 in this respect, and we found GPS to be just like Rabi}
+Among continuous-drive protocols, multi-segment equiangular sequences
+with $N=8$ or $N=16$ segments reduce the normalized frequency variance
+by $\approx30\%$ relative to Ramsey under white and $1/f$ noise,
+while GPS $m=1$ achieves near-complete rejection of band-limited noise
+whose spectrum lies below the Rabi frequency.
+\LZ{I would be careful with CPMG comparisons in the abstract, as CPMG has zero sensitivity to DC noise, and is therefore not useful for clocks (it's a nice probe of laser noise, however). Generally, an interesting point to make is that GPS retains DC sensitivity even when $m>1$.}
+
+Pulsed QSP sequences, optimized over pulse angles and phases, universally converge
+to a \emph{double-$\pi$} structure that achieves a DC sensitivity four times higher
+than any continuous-drive three-level protocol---matching the fundamental sensitivity
+of optimal two-level Ramsey spectroscopy.
+All GPS protocols retain full DC sensitivity even at $m>1$;
+none sacrifice clock functionality for improved noise filtering.
+These results are validated via exact numerical filter-function calculations and
+establish a quantitative protocol hierarchy matched to the noise environment.
+\LZ{A lot of the symbols are not explained in abstract, and are therefore meaningless to reader at first. I'd take down most of the maths}
+
 \end{abstract}
 
 \maketitle
@@ -79,7 +94,7 @@ quantitative hierarchy of clock protocols matched to the noise environment.
 % ============================================================
 
 Optical atomic clocks have reached unprecedented levels of precision, with systematic
-uncertainties at or below the $10^{-18}$ level \cite{}.
+uncertainties at or below the $10^{-18}$ level \cite{Bloom2014,Ushijima2015,McGrew2018}.
 Yet further improvements---particularly for portable and fieldable clocks---require confronting
 two practical challenges that are not fully addressed by the standard two-level Ramsey protocol:
 (i) maximizing the \emph{DC sensitivity} of the atomic response so that small frequency
@@ -90,13 +105,35 @@ Both challenges are ultimately questions about how a quantum system processes an
 its environment, and both can be addressed through careful design of the pulse sequence
 applied to the atomic transition.
 
-Quantum Signal Processing (QSP) \cite{} provides a systematic algebraic framework for
+Composite pulse sequences have long been used to improve clock performance beyond
+the standard Ramsey protocol.
+Hyper-Ramsey sequences~\cite{Yudin2010,Huntemann2012} and their extensions suppress systematic
+light-shift errors by combining multiple free-precession intervals.
+Dynamical decoupling techniques---CPMG and its variants---suppress low-frequency
+dephasing in qubits and trapped ions by interleaving refocusing pulses, with the
+noise-filtering effect quantified via the \emph{filter function}~\cite{Cywinski2008,Green2013},
+the spectral overlap of which with the noise power spectral density gives the
+shot-to-shot variance directly.
+Walsh-function modulated sequences extend this idea to multi-tone noise
+environments~\cite{Hayes2011,Magesan2011}.
+Global Phase Spectroscopy (GPS)~\cite{GPS} takes a different approach: rather than
+suppressing noise, it encodes the detuning as a global phase of a cyclic SU(2)
+evolution, reading out via a long-lived clock transition in a three-level
+$\Lambda$ system.
+GPS was shown to maintain DC sensitivity at high Rabi order $m$ while simultaneously
+shifting the filter function to higher frequencies, offering advantages in $1/f$
+noise environments.
+Despite this progress, no unified framework has existed to compare GPS, Ramsey,
+and general composite-pulse protocols on equal footing, or to optimize over the
+full sequence space for a given noise model.
+
+Quantum Signal Processing (QSP) \cite{LowChuang2017} provides a systematic algebraic framework for
 designing pulse sequences that implement prescribed polynomial transformations of quantum
-matrix elements \cite{}.
+matrix elements \cite{LowGMN2019,Gilyen2019}.
 Although QSP was originally introduced in the context of quantum algorithms,
 its structure---alternating between a fixed ``signal'' rotation and programmable
 ``signal processing'' phase shifts---maps naturally onto the composite pulse sequences
-already used in atomic physics (Ramsey, CPMG, hyper-Ramsey, dynamical decoupling).
+already used in atomic physics.
 This suggests that QSP provides a unifying language for understanding and optimizing
 the noise-filtering properties of clock protocols.
 
@@ -109,54 +146,77 @@ the finite duration of the drive and the correlated noise experienced \emph{duri
 each pulse.
 Furthermore, they do not directly connect to the per-shot frequency sensitivity
 $\sigma^2_\nu$ that governs clock stability.
-The GPS protocol \cite{GPS} introduced measurement via a three-level $\Lambda$ system to improve
-sensitivity, but a theoretical framework connecting GPS to filter function design is lacking.
+The GPS protocol \cite{GPS} reads out via the long-lived clock transition
+in a three-level $\Lambda$ system, shifting the filter-function weight toward
+the Rabi frequency $\Omega$ and providing advantages under $1/f$ or band-limited
+noise---without sacrificing the DC sensitivity of three-level Ramsey
+spectroscopy.
+\LZ{This comes accross as too big of a shortcut; perhaps one can average the noise better and therefore interrogate for a little bit longer when using GPS and not Ramsey, BUT for the same interrogation time, Ramsey has factor 2 greater sensitivity to constant detuning from the clock transition}
+That work demonstrated sensitivity functions for specific drive parameters,
+but left open the questions of: (i) optimality of GPS vs.\ equiangular sequences
+according to a noise-model-matched FOM; (ii) the effect of pulse shaping on the
+filter-function roll-off; and (iii) whether pulsed QSP sequences can exceed the
+GPS and Ramsey DC sensitivity ceiling.
+\LZ{To be fair, we do show sensitivity functions in the cited work. Perhaps we could be more specific about which questions are remaining about the GPS - like, optimality according to some FOMs, pulse shaping effect, etc}
 
 In this work, we close these gaps by developing the \emph{temporal QSP} formalism:
 an extension of canonical QSP to continuous-time noise processes that captures
 both finite-pulse-duration effects and the full spectral structure of the noise.
 Our main contributions are:
 
+Specifically, we ask and answer four questions about clock protocol design:
+
 \begin{enumerate}
-  \item A unified analytical expression for the per-shot frequency sensitivity and
-        noise filter function in terms of temporal QSP polynomials $F(t),G(t)$,
-        valid for both two-level and three-level $\Lambda$-system clocks
-        (Secs.~\ref{sec:temporal_qsp}--\ref{sec:multilevel}).
+  \item \emph{How can the noise-filtering properties of any clock protocol be characterized
+        and compared on a common footing?}
+        We derive a closed-form filter function for any pulse sequence on both two-level
+        and three-level $\Lambda$-clock systems.
+        A key structural result---the DC consistency condition---ties the filter function
+        at zero frequency directly to the squared signal slope, so sensitivity and noise
+        suppression are not independently tunable.
 
-  \item An analytic proof that \emph{all} GPS protocols operating at integer-cycle resonance
-        ($\delta=0$) share the same DC sensitivity as Ramsey: $|\partial_\delta S|^2 = T^2/4$,
-        so protocol differences in FOM arise entirely from filter-function differences
-        (Sec.~\ref{sec:gps}).
+  \item \emph{Do GPS protocols sacrifice sensitivity relative to three-level Ramsey?}
+        We prove analytically that all GPS protocols at integer-cycle resonance share
+        the same DC sensitivity as three-level Ramsey ($|\mathcal{S}|^2 = T^2/4$),
+        so performance differences arise entirely from filter-function shape.
+        This three-level DC sensitivity is four times below optimal two-level Ramsey ($T^2$);
+        the double-$\pi$ QSP sequences of item~4 recover this gap.
+        \LZ{I'll be annoying and mention again that I am convinced this result is wrong..}
 
-  \item A demonstration that GPS filter functions are \emph{peaked}, not nulled, at the Rabi
-        frequency; GPS $m=1$ achieves near-perfect noise rejection for band-limited noise
-        with cutoff above $\Omega = 2\pi m/T$ (Sec.~\ref{sec:analytics}).
+  \item \emph{What noise environments favor GPS, and why?}
+        GPS filter functions are peaked at the Rabi frequency under the correct
+        detuning Hamiltonian (not nulled, as previously claimed).
+        GPS $m=1$ achieves $\sim60\times$ reduction in normalized frequency variance
+        relative to Ramsey for band-limited noise whose spectrum lies below the drive
+        frequency---near-complete suppression in any experimentally achievable sense.
+        \LZ{It would be nice to clarify what does 'perfect' mean in this context. Is there some fundamental bound to AC sensitivity and we are close to saturating it for a given interrogation time? It'd also be nice to add analysis concerning adiabatic Ramps of $\Omega$ at the start and end of GPS - we know that for simple Rabi it helped with speeding up the asymptotic decay of sensitivity function (see: https://iopscience.iop.org/article/10.1088/1367-2630/aaa37c)}
 
-  \item A systematic comparison of three protocol classes under white, $1/f$, and high-pass
-        noise: continuous-drive GPS, optimized equiangular, and pulsed QSP sequences
-        (Sec.~\ref{sec:analytics}).
+  \item \emph{Can a three-level clock match the sensitivity of two-level Ramsey?}
+        Pulsed QSP sequences optimized over pulse angles and phases universally converge
+        to a double-$\pi$ structure that achieves a DC sensitivity four times higher
+        than standard three-level Ramsey---closing the gap to optimal two-level
+        Ramsey spectroscopy.
 
-  \item The discovery that pulsed QSP sequences---optimized over rotation angles and phases
-        under a fixed fast Rabi frequency---rediscover CPMG-like spin-echo structures that
-        achieve $3$--$7\times$ FOM improvement over all continuous-drive protocols by
-        suppressing low-frequency noise via partial spin-echo refocusing
-        (Sec.~\ref{sec:analytics}).
-
-  \item Analytical conditions under which the Kubo linear response approximation holds,
-        with numerical verification (Sec.~\ref{sec:validity}).
+  \item \emph{When does the linear-response filter-function picture break down?}
+        We derive analytical conditions on the noise amplitude and interrogation time
+        below which the Kubo approximation is quantitatively reliable,
+        and verify these conditions numerically for Ramsey and GPS protocols.
 \end{enumerate}
 
 The paper is organized as follows.
 Section~\ref{sec:metrics} introduces the two key clock performance metrics and the FOM.
-Section~\ref{sec:temporal_qsp} develops the temporal QSP formalism and Kubo linear
-response theory for the three-level $\Lambda$ clock.
-Section~\ref{sec:multilevel} analyzes two-level and three-level protocols, establishing
-the GPS sensitivity formula and filter function structure.
-Section~\ref{sec:analytics} presents the full protocol comparison and figures.
+Section~\ref{sec:temporal_qsp} develops the system-agnostic temporal QSP formalism
+and Kubo linear-response theory.
+Section~\ref{sec:two_level} specializes the framework to two-level spectroscopy,
+deriving the Ramsey filter function and baseline FOM.
+Section~\ref{sec:three_level} treats the three-level $\Lambda$ clock, establishes
+the GPS propagator and filter function, and proves that GPS shares the same DC
+sensitivity as three-level Ramsey ($T^2/4$)\LZ{(probably wrong)}.
+Section~\ref{sec:analytics} presents the full protocol comparison across noise models
+and closes with numerical validation.
 Section~\ref{sec:validity} analyzes the validity regime of linear response theory.
-Section~\ref{sec:pulseshaping} discusses pulse shaping to further optimize noise filtering.
-Section~\ref{sec:strong_noise} addresses the strongly noisy regime via direct clock
-simulations and Allan variance.
+Section~\ref{sec:pulseshaping} discusses pulse shaping for steeper filter roll-off.
+Section~\ref{sec:strong_noise} addresses the strongly noisy regime.
 We conclude in Section~\ref{sec:conclusion}.
 
 
@@ -166,10 +226,11 @@ We conclude in Section~\ref{sec:conclusion}.
 % ============================================================
 
 This section defines the two key figures of merit that quantify atomic clock performance
-and establishes the FOM that combines them into a single optimization target.
-We will show that these two quantities---sensitivity and noise---are both controlled by
-the same underlying object, the temporal QSP path function $\Phi(t)$, which connects
-the clock design problem to the algebra of SU(2) rotations.
+and establishes the figure of merit (FOM) that combines them into a single optimization target.
+The noise variance entering the FOM is expressed as a spectral overlap integral
+between the noise power spectral density and a filter function that depends entirely
+on the pulse sequence; this connection is made quantitative by the temporal QSP
+framework developed in Sec.~\ref{sec:temporal_qsp}.
 
 \subsection{Frequency sensitivity}
 \label{sec:freq_sensitivity}
@@ -191,19 +252,29 @@ On resonance ($\delta = 0$), the numerator has two contributions:
   \mathrm{Var}(M) = \mathrm{Var}_{\rm QPN}(M) + \langle \delta M^2 \rangle_{\rm noise}\,,
   \label{eq:var_total}
 \ee
-where $\mathrm{Var}_{\rm QPN}$ is quantum projection noise (irreducible) and
-$\langle \delta M^2 \rangle_{\rm noise}$ is the variance driven by technical noise.
+where $\mathrm{Var}_{\rm QPN}(M)$ is the quantum projection noise (QPN)---the irreducible
+variance of any binary quantum measurement on a single atom---and
+$\langle \delta M^2 \rangle_{\rm noise}$ is the variance driven by technical noise in
+the laser or control fields.
+QPN sets a fundamental floor that scales as $1/N_{\rm atoms}$ and is reduced by using
+more atoms or entangled states; it is independent of the pulse sequence and therefore
+does not enter the protocol comparison performed here.
+This paper focuses on technical-noise suppression---the pulse-sequence-dependent
+contribution---which is the dominant limit in modern optical lattice clocks operating
+at or near the QPN floor.
 Good clock design means both \emph{maximizing the signal slope}
 $\mathcal{S} = |\partial_\delta\langle M\rangle|_{\delta=0}$ and
 \emph{minimizing the noise variance} $\langle\delta M^2\rangle_{\rm noise}$.
 
-For wide-sense stationary technical noise, the Kubo linear response formula gives
+\LZ{It would be good to differentiate the expectation value in quantum state, $\langle \rangle$, from average over noise realizations; you could put a bar over the averaged quantity, here: $\overline{\langle\delta M\rangle^2}$}
+For wide-sense stationary technical noise, the shot-to-shot classical noise variance of the
+signal mean $\langle M\rangle$ is
 \be
-  \langle \delta M^2 \rangle_{\rm noise} = \int_{-\infty}^{\infty}
-    \frac{d\omega}{2\pi}\, S_\beta(\omega)\, \mathcal{F}_e(\omega)\,,
+  \overline{\langle \delta M \rangle^2}_{\rm noise} = \int_{-\infty}^{\infty}
+    \frac{d\omega}{2\pi}\, S_\beta(\omega)\, \mathcal{F}(\omega)\,,
   \label{eq:noise_var_general}
 \ee
-where $S_\beta(\omega)$ is the (one-sided) noise power spectral density and $\mathcal{F}_e(\omega)$
+where $S_\beta(\omega)$ is the (two-sided) noise power spectral density and $\mathcal{F}(\omega)$
 is the \emph{filter function} of the pulse sequence, derived in Sec.~\ref{sec:temporal_qsp}.
 The filter function is entirely determined by the trajectory of the quantum state during
 the pulse sequence: different protocols (Ramsey, GPS, CPMG, equiangular) differ only in
@@ -212,18 +283,89 @@ the shape of this trajectory.
 \subsection{Figure of merit}
 \label{sec:fom}
 
-The two metrics---sensitivity $\mathcal{S}^2$ and noise Kubo integral
-$\mathcal{K}(S_\beta) = \int \mathcal{F}_e(\omega)S_\beta(\omega)\,d\omega/(2\pi)$---combine
-into a single \emph{figure of merit} (FOM):
+The normalised per-shot frequency variance combines both metrics into a single
+figure of merit (FOM).
+A key structural insight, which we call the \emph{DC consistency condition},
+is that the filter function evaluated at zero frequency equals the squared signal slope:
 \be
-  \mathrm{FOM}(S_\beta) \equiv \frac{\mathcal{S}^2}{\mathcal{K}(S_\beta)}
-  = \frac{|\partial_\delta\langle M\rangle|^2_{\delta=0}}
-         {\displaystyle\int_{-\infty}^\infty \frac{d\omega}{2\pi}\,S_\beta(\omega)\,\mathcal{F}_e(\omega)}\,.
+  \mathcal{F}_e(0) = \left|\int_0^T|G(t)|^2\,dt\right|^2 = \mathcal{S}^2
+  = |\partial_\delta\langle M\rangle|^2_{\delta=0}\,.
+  \label{eq:dc_consistency}
+\ee
+The filter function $\mathcal{F}_e(\omega)$ therefore describes the sequence's
+frequency response at \emph{all} frequencies on a common scale: at $\omega=0$ it
+equals the sensitivity squared (how well the sequence discriminates DC detuning),
+and at $\omega > 0$ it describes how strongly the sequence couples to noise
+oscillating at that frequency.
+
+This observation suggests the natural bandlimited FOM
+\be
+  \sigma^2_\nu(S_\beta) \equiv
+  \frac{\displaystyle\int_{\omega_{\min}}^{\infty}
+    \frac{d\omega}{2\pi}\,S_\beta(\omega)\,\mathcal{F}_e(\omega)}
+  {\mathcal{F}_e(0)}\,,
   \label{eq:fom}
 \ee
-Maximizing FOM is equivalent to minimizing the per-shot frequency estimation variance
-$\sigma^2_\nu$.  The FOM depends on the noise model: different noise spectra $S_\beta(\omega)$
+where the lower cutoff $\omega_{\min} = 2\pi/T$ is the \emph{Fourier resolution
+limit}: noise fluctuations slower than one full interrogation cycle of duration $T$
+cannot be resolved by a single shot and contribute only a shot-independent bias,
+not to the frequency estimation variance.
+By the DC consistency condition~\eqref{eq:dc_consistency}, the denominator equals
+$\mathcal{S}^2 = |\partial_\delta\langle M\rangle|^2$, so $\sigma^2_\nu$ is
+precisely the per-shot frequency variance~\eqref{eq:sigma_nu} evaluated over
+the resolvable frequency band.
+
+The FOM has a transparent physical interpretation: the numerator is the
+noise-weighted filter function integrated over all frequencies the clock can
+actually resolve (above the Fourier limit), and the denominator is the DC filter
+value that sets the clock's sensitivity to constant detuning.
+For three-level $\Lambda$-clock protocols, the standard Ramsey sequence achieves
+$\mathcal{F}_e^{\rm Ramsey}(0) = T^2/4$; any sequence that reduces $\mathcal{F}_e(0)$
+below this value while also worsening noise performance is doubly penalized.
+The fundamental upper bound is $\mathcal{F}_e(0) = T^2$,
+achievable by the double-$\pi$ QSP construction (Sec.~\ref{sec:qsp_results}) and by
+optimal two-level Ramsey spectroscopy~\cite{Ramsey1950}.
+
+In practice, numerical optimization of $\sigma^2_\nu$ over sequence parameters
+can encounter degenerate solutions in which $\mathcal{F}_e(0)\to 0$ (vanishing
+sensitivity) trivially minimizes the ratio.
+To avoid this we minimize the positive-definite composite objective
+\be
+  f \equiv \frac{1}{\mathcal{F}_e(0)}
+         + \frac{\mathcal{V}}{\mathcal{F}_e(0)^2}
+         = \frac{1 + \sigma^2_\nu}{\mathcal{F}_e(0)}\,,
+  \label{eq:score_inv}
+\ee
+where $\mathcal{V} = \int_{\omega_{\min}}^\infty
+\mathcal{F}_e(\omega)S_\beta(\omega)\,d\omega/(2\pi)$.
+The first term penalizes low DC sensitivity; the second penalizes excess noise
+coupling relative to the sensitivity squared.
+Both terms scale as $1/\mathcal{F}_e(0)$, so the objective is bounded below by
+zero and diverges whenever sensitivity vanishes, preventing the degenerate
+collapse.
+Protocol comparisons throughout the paper use $\sigma^2_\nu$
+as the primary reported metric; $f$ is used as the optimization
+objective in Sec.~\ref{sec:analytics} and Supplemental~Sec.~SVI.
+
+Minimizing $\sigma^2_\nu$ is equivalent to minimizing the per-shot frequency
+estimation variance.
+The FOM depends on the noise model: different noise spectra $S_\beta(\omega)$
 favor different protocol designs.
+
+\paragraph{Connection to Allan deviation.}
+For a clock with per-shot interrogation time $T$ and atom cycle time $T_c \geq T$,
+the fractional frequency instability averaged over $\tau = N T_c$ is
+$\sigma_y(\tau) \approx \nu_{\rm at}^{-1}\sqrt{\sigma^2_\nu/(N)} = \nu_{\rm at}^{-1}\sqrt{\sigma^2_\nu T_c/\tau}$,
+where $\nu_{\rm at}$ is the atomic transition frequency.
+Thus $\sigma^2_\nu$ sets the pre-factor of the Allan deviation directly:
+protocols with lower $\sigma^2_\nu$ produce a lower Allan floor at every averaging
+time $\tau$.
+This connection assumes that different shots are statistically independent, which
+holds when the noise correlation time is shorter than $T_c$.
+The breakdown of linear response and the appearance of fringe-hopping at large
+$\epsilon_{\rm rms}$ degrade the Allan deviation beyond the predictions of
+$\sigma^2_\nu$; these non-perturbative effects are discussed in
+Sec.~\ref{sec:strong_noise}.
 
 Throughout this paper we compare protocols under three noise models of practical importance:
 \begin{enumerate}
@@ -238,8 +380,9 @@ falls with increasing $\omega$.  The overlap integral~\eqref{eq:noise_var_genera
 minimized by making $\mathcal{F}_e(\omega)$ small at low frequencies.
 For high-pass environments, a protocol whose filter function is concentrated \emph{below}
 the cutoff $\omega_c$ achieves nearly perfect noise rejection.
-The relationship between FOM and the Allan deviation $\sigma_y(\tau)$ is established
-in Sec.~\ref{sec:strong_noise}.
+The relationship between FOM and the Allan deviation $\sigma_y(\tau)$, and the
+breakdown of linear response at large noise amplitudes, are discussed in
+Sec.~\ref{sec:strong_noise}.
 
 
 % ============================================================
@@ -247,11 +390,16 @@ in Sec.~\ref{sec:strong_noise}.
 \label{sec:temporal_qsp}
 % ============================================================
 
-This section develops the mathematical framework used throughout the paper.
-We define the temporal QSP polynomial trajectory, derive the Kubo formula for the noise
-variance in terms of this trajectory, and specialize to the three-level $\Lambda$ clock.
-The key output is the filter function $\mathcal{F}_e(\omega)$ of~\eqref{eq:noise_var_general},
-which is evaluated for each protocol in Sec.~\ref{sec:analytics}.
+This section develops the system-agnostic mathematical framework used throughout the paper.
+We define the temporal QSP propagator and its Cayley--Klein amplitudes $F(t)$, $G(t)$,
+derive the Kubo linear-response formula for the noise-driven variance in terms of two
+scalar path functions built from this trajectory, and establish the general form of the
+filter function $\mathcal{F}(\omega)$.
+The specialization to specific physical systems---two-level Ramsey and three-level
+$\Lambda$-clock---is deferred to Secs.~\ref{sec:two_level}--\ref{sec:three_level},
+where the initial state, observable, and Hamiltonian structure are treated explicitly.
+The filter function derived here applies equally to both system types;
+its evaluation for each protocol class is presented in Sec.~\ref{sec:analytics}.
 
 \subsection{The temporal QSP formalism}
 \label{sec:tqsp_formalism}
@@ -264,8 +412,8 @@ $\{|g\rangle,|e\rangle\}$, the propagator at time $t$ during segment $j$ is:
   U_{\rm QSP}(t) &\equiv \begin{pmatrix} F(t) & iG(t) \\ iG^*(t) & F^*(t) \end{pmatrix}
   \label{eq:u_qsp_poly}
 \end{align}
-where the Cayley--Klein amplitudes $F(t), G(t)$ satisfy $|F|^2+|G|^2=1$ and obey the
-recurrence (see Appendix~\ref{app:recurrences})
+where the amplitudes $F(t), G(t)$ satisfy $|F|^2+|G|^2=1$ and obey the
+recurrence (see Supplemental Material, Sec.~SX)
 \begin{align}
   F_j(t) &= \cos\tfrac{\theta_j(t)}{2}\,f_{j-1} - e^{-i\phi_j}\sin\tfrac{\theta_j(t)}{2}\,g_{j-1}^*\,,
   \label{eq:recurrence_F} \\
@@ -274,7 +422,7 @@ recurrence (see Appendix~\ref{app:recurrences})
 \end{align}
 with $\theta_j(t) = \Omega_j(t - t_{j-1})$, $f_0 = 1$, $g_0 = 0$.
 
-The global Cayley--Klein amplitudes $F(t)$, $G(t)$ are assembled piecewise from these
+The global amplitudes $F(t)$, $G(t)$ are assembled piecewise from these
 per-segment solutions.  Defining segment boundaries $t_j = \sum_{k=1}^j\tau_k$
 (with $t_0=0$, $t_d=T$), the Heaviside step function $\Theta$ selects the active segment
 at each time $t$:
@@ -319,17 +467,42 @@ the filter function.
 \subsubsection{Pulsed QSP protocol}
 \label{sec:qsp_pulsed}
 
-A pulsed QSP sequence consists of $n$ instantaneous rotations
-$R(\theta_j, \phi_j)$ in the $xy$-plane, separated by $n-1$ equal free-evolution gaps:
+In canonical QSP~\cite{LowChuang2017,LowGMN2019}, a unitary sequence alternates a fixed \emph{signal operator}
+$W(\theta)$ with classically controlled \emph{signal processing operators}
+$e^{i\phi_j\sigma_\varphi}$:
 \be
-  R(\theta_1,\phi_1) - \tau_{\rm free} - R(\theta_2,\phi_2) - \cdots - R(\theta_n,\phi_n)\,,
+  U_{\rm QSP} = e^{i\phi_0\sigma_\varphi}
+    \prod_{j=1}^{n} R_{\bb{n}}(\theta)\,e^{i\phi_j\sigma_\varphi}\,,
+  \label{eq:canonical_qsp}
+\ee
+where $R_{\bb{n}}(\theta) = e^{i(\theta/2)\,\bb{n}\cdot\boldsymbol{\sigma}}$ is the
+\emph{signal operator} encoding the (generally unknown) rotation angle $\theta$, and
+$e^{i\phi_j\sigma_\varphi}$ are the \emph{signal processing operators} with
+classically controlled phases $\{\phi_j\}$.  In the atomic-clock context the signal
+is the phase accumulated during free evolution of duration $\tau_{\rm free}$ under a
+detuned Hamiltonian, so the signal operator takes the form
+$R_{\bb{z}}(\Delta\tau_{\rm free}) = e^{-i\Delta\tau_{\rm free}\sigma_z/2}$,
+encoding the laser detuning $\Delta$ as the unknown signal angle $\theta = \Delta\tau_{\rm free}$.
+
+The pulsed QSP sequences used in this paper adopt this signal--processing structure
+but generalize the processing operators to $xy$-plane rotations
+$R(\theta_j,\phi_j) = e^{-i(\theta_j/2)(\cos\phi_j\,\sigma_x+\sin\phi_j\,\sigma_y)}$
+in which \emph{both} the rotation angle $\theta_j$ and the axis angle $\phi_j$ are
+optimized.  The full unitary for $n$ pulses separated by $n-1$ equal free-evolution
+gaps is:
+\be
+  U_{\rm pulsed} =
+    R(\theta_n,\phi_n)\,W\,R(\theta_{n-1},\phi_{n-1})\,W\cdots W\,R(\theta_1,\phi_1)\,,
   \label{eq:qsp_pulsed}
 \ee
-with $\tau_{\rm free} = (T - \sum_j\tau_j)/(n-1)$ and fast pulses $\tau_j = \theta_j/\Omega_{\rm fast}$
-($\Omega_{\rm fast} = 20\pi$) short compared to $\tau_{\rm free}$.
-The $2n-1$ free parameters are $\theta_1,\ldots,\theta_n\in(0,\pi]$ and
+where $W = e^{-i\Delta\tau_{\rm free}\sigma_z/2}$ is the signal operator and
+$\tau_{\rm free} = (T - \sum_j\tau_j)/(n-1)$ with fast pulse durations
+$\tau_j = \theta_j/\Omega_{\rm fast}$ ($\Omega_{\rm fast} = 20\pi$) short compared to
+$\tau_{\rm free}$.  This extends canonical QSP---where $\theta$ is fixed and only the
+processing phases $\{\phi_j\}$ are free---to a family parameterized by the $2n-1$
+independent parameters $\theta_1,\ldots,\theta_n\in(0,\pi]$ and
 $\phi_2,\ldots,\phi_n\in[0,2\pi)$ ($\phi_1=0$ by gauge).
-Ramsey is the special case $n=2$, $\theta_j = \pi/2$, $\phi_j = 0$.
+Ramsey is recovered as the special case $n=2$, $\theta_j = \pi/2$, $\phi_j = 0$.
 
 Because the free-evolution segments satisfy $F_j(t)=f_{j-1}$ and $G_j(t)=g_{j-1}$ (constant),
 the path functions $\phi(t)=F^*G$ and $\chi(t)=|G|^2$ are piecewise constant between pulses.
@@ -338,260 +511,399 @@ recurrence~\eqref{eq:recurrence_F}--\eqref{eq:recurrence_G} at zero duration.
 The Fourier integrals~\eqref{eq:Phi}--\eqref{eq:Chi} therefore reduce to a sum of
 sinc-like terms, one per free-evolution gap.
 
-These sequences are optimized using the same procedure as equiangular (see Appendix~\ref{app:optimization}).
-For $n=3,5,9$, the optimizer consistently finds sequences with a final pulse of
-$\theta_n \approx 0.85$--$0.92\pi$, a near-$\pi$ refocusing pulse that creates a
-partial spin echo.  Performance is compared in Sec.~\ref{sec:analytics}.
-
-\paragraph{Noise Hamiltonian for the $\Lambda$ system.}
-The dominant noise source is a stochastic detuning fluctuation:
-\be
-  H_\epsilon(t) = \beta_e(t)\,|e\rangle\langle e|\,,
-  \label{eq:noise_ham_3L}
-\ee
-where $\beta_e(t)$ represents laser frequency noise modeled as a zero-mean,
-wide-sense stationary Gaussian process with PSD $S_{\beta_e}(\omega)$.
-Magnetic field noise on the clock transition $|g\rangle$-$|m\rangle$ is included
-via the $\mathcal{F}_m$ term in~\eqref{eq:main_result} but neglected below.
-
-
-\subsection{Three-level $\Lambda$-clock propagator}
-\label{sec:3level_propagator}
-
-For the three-level $\Lambda$ system with states $|g\rangle$, $|e\rangle$, $|m\rangle$,
-the physically correct laser-detuning Hamiltonian is
-\be
-  H_\delta = \delta\,|e\rangle\langle e|\,,
-  \label{eq:H_delta}
-\ee
-which shifts only the optically excited state (not $|g\rangle$ or $|m\rangle$).
-This is \emph{not} traceless in the probe subspace; ignoring the difference leads to
-incorrect signal predictions for multi-segment sequences (see Appendix~\ref{app:gps_sensitivity}).
-
-Under a continuous drive at Rabi frequency $\Omega$ and detuning $\delta$ for duration $\tau$,
-the three-level propagator is
-\be
-  U(\tau) = e^{-i\delta\tau/2}
-  \begin{pmatrix}
-      f & ig & 0 \\
-      ig^* & f^* & 0 \\
-      0 & 0 & e^{+i\delta\tau/2}
-  \end{pmatrix},
-  \label{eq:propagator_3L}
-\ee
-where $f,g$ are the CK amplitudes for the SU(2) rotation in the probe subspace under
-the \emph{traceless} part of $H_\delta + H_{\rm drive}$, and the global probe phase
-$e^{-i\delta\tau/2}$ accumulates relative to $|m\rangle$ across each segment.
-For multi-segment sequences, this global phase must be tracked cumulatively.
+These sequences are optimized using the same procedure as equiangular (see Supplemental Material, Sec.~SVI).
+For $n=3,5,9$, the optimizer universally finds double-$\pi$ sequences
+$\theta\approx[\pi,0,\ldots,0,\pi]$, $\phi\approx 0$, which maximize DC sensitivity.
+Performance is compared in Sec.~\ref{sec:analytics}.
 
 \subsection{Kubo linear response and the filter function}
 \label{sec:kubo}
 
-We compute the noise-driven variance in the toggling frame of the QSP sequence.
-With initial state $|\Psi\rangle = (|g\rangle + |m\rangle)/\sqrt{2}$ and observable
-$M = \sigma_y^{gm} = -i|g\rangle\langle m| + i|m\rangle\langle g|$
-(corresponding to measurement direction $\hat{y}$ in the $\{g,m\}$ Bloch sphere,
-with $m_y=1$, $m_x=m_z=0$), the Kubo formula evaluates to (derived in Appendix~\ref{app:kubo}):
+We compute the classical noise variance of the signal mean using the
+toggling-frame linear-response formula.
+The relevant quantity is the shot-to-shot variance
+$\overline{\langle\delta M\rangle^2}_{\rm noise}$,
+not the full quantum Kubo variance $\langle\delta M^2\rangle$.
+For a QSP sequence described by amplitudes $F(t)$, $G(t)$ and a noise
+Hamiltonian $H_\epsilon = \beta(t)\,\hat{A}$ coupling to the probe transition,
+the classical noise variance takes the form
+(full derivation in Supplemental Material, Sec.~SII):
 \be
-  \langle \delta M^2 \rangle = \int_{-\infty}^{\infty}\frac{d\omega}{2\pi}
-    \Bigl[S_{\beta_e}(\omega)\,\mathcal{F}_e(\omega) + S_{\beta_m}(\omega)\,\mathcal{F}_m(\omega)\Bigr]\,,
-  \label{eq:main_result}
+  \overline{\langle \delta M \rangle^2}_{\rm noise}
+  = \int_{-\infty}^{\infty}\frac{d\omega}{2\pi}\,
+    S_\beta(\omega)\,\mathcal{F}(\omega)\,,
+  \label{eq:kubo_general}
 \ee
-with the e-noise and m-noise filter functions:
-\begin{align}
-  \mathcal{F}_e(\omega) &= \tfrac{1}{2}|\Phi(\omega)|^2 + |\mathcal{X}(\omega)|^2\,,
-  \label{eq:Fe} \\
-  \mathcal{F}_m(\omega) &= -\frac{1 - \cos\omega T}{\omega^2}\,,
-  \label{eq:Fm}
-\end{align}
-where $\Phi(\omega)$ and $\mathcal{X}(\omega)$ are defined in~\eqref{eq:Phi}--\eqref{eq:Chi}.
+where $S_\beta(\omega)$ is the two-sided power spectral density of the noise
+and $\mathcal{F}(\omega)$ is the \emph{filter function} of the pulse sequence.
+The filter function is entirely determined by the first-order sensitivity trajectory
+$r(t) = \langle\psi_0|[M_I(T), \tilde{A}_e(t)]|\psi_0\rangle$
+through $\mathcal{F}(\omega) = |\mathcal{F}[r(t)](\omega)|^2$,
+where $M_I(T) \equiv U^\dagger(T)\,M\,U(T)$ is the lab-frame observable conjugated
+by the \emph{full} propagator at the end of the sequence.
+A key property is the DC consistency condition
+$\mathcal{F}(0) = \mathcal{S}^2$ (the filter function at zero frequency equals
+the signal slope squared), ensuring the filter function and sensitivity
+are not independent quantities.
 
-The filter function $\mathcal{F}_e(\omega)$ is composed of two terms:
-$\frac{1}{2}|\Phi|^2$ from the coherence channel $F^*G$ (coupling of e-noise to the
-$|g\rangle$-$|e\rangle$ coherence) and $|\mathcal{X}|^2$ from the population channel $|G|^2$
-(coupling to the $|e\rangle$ population).
-For a pure free-evolution segment at $\delta=0$, $F$ and $G$ are constant, and neither
-channel accumulates noise; noise enters only during the driven segments.
-The $\mathcal{F}_m$ term describes noise on the clock transition $|g\rangle$-$|m\rangle$;
-for optical clocks with a stable RF reference, $S_{\beta_m} \ll S_{\beta_e}$ and this
-term is negligible.  We therefore focus on $\mathcal{F}_e$ throughout.
-
-\subsection{Signal slope}
-\label{sec:kubo_dc}
-
-The signal slope $\mathcal{S} = \partial_\delta\langle M\rangle|_{\delta=0}$ is computed
-from the detuning derivative of the propagator~\eqref{eq:propagator_3L}.
-Both the global probe phase and the detuning dependence of the CK amplitudes contribute.
-The analytic formula for GPS protocols is derived in Appendix~\ref{app:gps_sensitivity};
-for general sequences, $\mathcal{S}$ is evaluated numerically.
+For sequences satisfying $G(T)=0$ (Ramsey, GPS-$m$, equiangular), $M_I(T)$ is
+proportional to $M = \sigma_y^{gm}$ in the $\{g,m\}$ subspace with
+$M_I(T) = m_y M$, $m_y = (-1)^m$ for GPS-$m$
+(Supplemental Material, Eqs.~\eqref{eq:MI_bloch}--\eqref{eq:r_G0}).
+In this case $r(t) = i\,m_y\,|G(t)|^2$ and, since $m_y^2=1$:
+\be
+  \mathcal{F}(\omega) = |\mathcal{X}(\omega)|^2
+    = \left|\int_0^T |G(t)|^2 e^{-i\omega t}\,dt\right|^2\,.
+  \label{eq:Fe_general}
+\ee
+For general pulsed QSP sequences with $G(T)\neq 0$, $M_I(T)$ acquires
+coherence-channel contributions and the filter function receives additional
+cross-terms involving $\Phi(\omega) = \mathcal{F}[F^*G]$
+(Supplemental Material, Eq.~\eqref{eq:r_general}).
+For the two-level sensor (Supplemental Material, Sec.~SVIII), $r(t)\propto\mathrm{Im}[F^*G]$
+and $\mathcal{F}(\omega) = |\Phi(\omega)|^2$; the population channel carries no
+independent information in that case because $|G|^2 = 1-|F|^2$ is determined by
+unitarity and the measurement of $\sigma_z$.
+All $\Phi(\omega)$ and $\mathcal{X}(\omega)$ are entirely determined by the
+noiseless trajectory, so different protocol classes differ \emph{only} in the
+shape of $\mathcal{F}(\omega)$.
+The explicit filter functions for each protocol are evaluated in
+Sec.~\ref{sec:analytics}.
 
 
 % ============================================================
-\section{Two-Level vs.\ Three-Level Systems}
-\label{sec:multilevel}
+\section{Two-Level Spectroscopy}
+\label{sec:two_level}
 % ============================================================
 
-This section uses the temporal QSP framework to compare two-level Ramsey spectroscopy
-with three-level GPS and equiangular protocols.
-A central result---Eq.~\eqref{eq:gps_sens_result}---is that all GPS protocols at
-integer-cycle resonance share the same DC sensitivity as Ramsey, reducing the
-protocol comparison entirely to filter-function differences.
-We also clarify the structure of GPS filter functions, correcting a common misstatement
-that GPS has filter-function nulls at the Rabi harmonics.
+This section specializes the temporal QSP framework to the two-level atom,
+establishes the filter function and signal slope for Ramsey spectroscopy,
+and sets the baseline against which three-level protocols are compared in
+Sec.~\ref{sec:three_level}.
 
-\subsection{Two-level spectroscopy}
-\label{sec:two-level}
+\subsection{Filter function}
+\label{sec:two_level_ff}
 
-For a two-level atom ($|m\rangle$ identified with $|e\rangle$, $M = \sigma_z$),
-the filter function reduces to $\mathcal{F}^{(2L)}(\omega) = |\Phi(\omega)|^2$
-(see Appendix~\ref{app:two_level_reduction}).
+For a two-level atom with probe states $\{|g\rangle,|e\rangle\}$, the optimal
+observable for Ramsey spectroscopy is $M = \sigma_y$ measured on the equatorial
+initial state $|\psi_0\rangle = (|g\rangle + |e\rangle)/\sqrt{2}$.
+Under this choice the general filter function~\eqref{eq:Fe_general}
+reduces to $\alpha=1$, $|\mathcal{X}|^2=0$, giving
+\be
+  \mathcal{F}^{(2L)}(\omega) = |\Phi(\omega)|^2
+  \label{eq:Fe_2L}
+\ee
+(derived in Supplemental Material, Sec.~SVIII).
+The population channel $|\mathcal{X}|^2$ vanishes for the following reason.
+In a two-level system, $|F(t)|^2 + |G(t)|^2 = 1$ by unitarity, so
+$|G(t)|^2 = 1 - |F(t)|^2$ is not an independent degree of freedom.
+The observable $M = \sigma_y$ on the equatorial initial state evaluates to
+$2\,\mathrm{Im}(F^*G)$ on any state reachable from $|\psi_0\rangle$, so its
+noise response is captured entirely by the coherence channel $F^*G$;
+the population channel carries no additional information and drops out of
+the variance calculation.
+Without a third reference state $|m\rangle$ that is unaffected by the drive,
+there is no way to independently resolve $|G|^2$ from the measurement of $M$.
 
-\subsubsection{Ramsey}
+\subsection{Ramsey protocol: filter function and signal slope}
 \label{sec:ramsey}
 
-The standard Ramsey protocol consists of two $\pi/2$ pulses of duration $\tau_p = \pi/(2\Omega_{\rm fast})$
-separated by free precession of duration $\tau_{\rm free} = T - 2\tau_p$.
-For $\Omega_{\rm fast} T \gg 1$ (fast-pulse limit), the filter function for instantaneous pulses is
+The standard Ramsey protocol consists of two $\pi/2$ pulses of duration
+$\tau_p = \pi/(2\Omega_{\rm fast})$ separated by free precession of duration
+$\tau_{\rm free} = T - 2\tau_p$.
+In the fast-pulse limit $\Omega_{\rm fast} T \gg 1$, the two $\pi/2$ pulses are
+nearly instantaneous and place the Bloch vector in the equatorial plane, after
+which it precesses freely for duration $\tau_{\rm free}\approx T$.
+During this free-evolution interval the drive is off ($\Omega=0$), so the
+recurrences~\eqref{eq:recurrence_F}--\eqref{eq:recurrence_G} give constant amplitudes
+$F(t)\approx f_1$ and $G(t)\approx g_1$, with $|f_1|^2+|g_1|^2=1$ and
+$|g_1|^2\approx\tfrac{1}{2}$ after the first $\pi/2$ pulse.
+Substituting into~\eqref{eq:Fe_2L} and integrating, the dominant contribution
+from the free-evolution interval gives the analytic filter function
 \be
   \mathcal{F}^{(2L)}_{\rm Ramsey}(\omega) = \frac{4\sin^2(\omega T/2)}{\omega^2}\,,
   \label{eq:F_ramsey}
 \ee
-with high-frequency roll-off $\mathcal{F} \sim \omega^{-2}$.
-The slope is $\mathcal{S}_{\rm Ramsey} = T/2$, giving
-$|\mathcal{S}_{\rm Ramsey}|^2 = T^2/4 = \pi^2$ for $T=2\pi$.
+with high-frequency roll-off $\mathcal{F}\sim\omega^{-2}$.
+The signal slope for this optimal measurement is $\mathcal{S}_{\rm Ramsey} = T$,
+consistent with the DC consistency condition $\mathcal{F}^{(2L)}_{\rm Ramsey}(0) = \mathcal{S}^2$:
+\be
+  |\mathcal{S}_{\rm Ramsey}|^2 = T^2 = 4\pi^2
+  \quad \text{for } T=2\pi\,.
+  \label{eq:ramsey_sens}
+\ee
+The noise integral under white noise gives the normalised frequency variance
+$\sigma^2_{\nu,w} = \mathcal{V}_w/\mathcal{S}^2 \approx 8.1\times10^{-3}$
+for $T=2\pi$, which serves as the primary baseline for all protocol comparisons in
+Sec.~\ref{sec:analytics}.
+Note that the commonly quoted $M{=}\sigma_z$ convention operating at the mid-fringe
+($\delta = \pi/(2T)$) yields the same filter function~\eqref{eq:F_ramsey} and thus
+the same $\sigma^2_\nu$; the $\sigma_y$ convention merely makes the DC working point
+transparent.
 
-\subsection{Three-level spectroscopy}
+
+% ============================================================
+\section{Three-Level Spectroscopy}
+\label{sec:three_level}
+% ============================================================
+
+This section specializes the temporal QSP framework to the three-level
+$\Lambda$ system used in Global Phase Spectroscopy (GPS).
+We derive the three-level propagator, establish the filter function and
+signal slope, prove that all GPS protocols share the same DC sensitivity
+as Ramsey, and analyze the GPS filter function structure.
+
+\subsection{Three-level $\Lambda$-clock propagator}
+\label{sec:3level_propagator}
+
+For the three-level $\Lambda$ system with states $|g\rangle$, $|e\rangle$,
+$|m\rangle$, the physically correct laser-detuning Hamiltonian is
+\be
+  H_\delta = \delta\,|e\rangle\langle e|\,,
+  \label{eq:H_delta}
+\ee
+which shifts only the optically excited state (not $|g\rangle$ or $|m\rangle$). \LZ{There are some subtleties here that we should discuss, which perhaps lead to the error that GPS has the same sensitivity as Ramsey. I would encourage going through the full exercise of going into frame rotating with laser frequency assuming presence of ground state degeneracy ($\ket{0}$ and $\ket{1}$ at zero energy). One can use the gauge invariance under $H\to H+c \times 1$ to make the Hamiltonian traceless over $\text{span}\{\ket{0},\ket{e}\}$, and any cyclic evolution in that frame will turn $\ket{0}+\ket{1}$ into $\exp(-i\delta t/2)\ket{0}-\ket{1}$, hence factor $1/2$ off in sensitivity from what one would get with Ramsey sequence.}
+This is \emph{not} traceless in the probe subspace; ignoring the difference
+leads to incorrect signal predictions for multi-segment sequences
+(see Supplemental Material, Sec.~SI).
+Under a continuous drive at Rabi frequency $\Omega$ and detuning $\delta$ for
+duration $\tau$, the three-level propagator is
+\be
+  U(\tau) = e^{-i\delta\tau/2}
+  \begin{pmatrix}
+      F(\tau) & iG(\tau) & 0 \\
+      iG^*(\tau) & F^*(\tau) & 0 \\
+      0 & 0 & e^{+i\delta\tau/2}
+  \end{pmatrix},
+  \label{eq:propagator_3L}
+\ee
+where the upper-left $2\times 2$ block is exactly the probe-subspace propagator
+$U_{\rm QSP}(\tau)$ of Eq.~\eqref{eq:u_qsp_poly}, with $F(\tau)$, $G(\tau)$
+the Cayley--Klein amplitudes satisfying the recurrences~\eqref{eq:recurrence_F}--\eqref{eq:recurrence_G}
+under the \emph{traceless} part of $H_\delta + H_{\rm drive}$.
+The additional factor $e^{-i\delta\tau/2}$ is a global probe phase that
+accumulates relative to the dark state $|m\rangle$ across each segment and
+must be tracked cumulatively for multi-segment sequences; it has no analog
+in the two-level case and is the origin of the correct GPS signal formula
+derived in Sec.~\ref{sec:gps}.
+
+\subsection{Filter function and signal slope}
+\label{sec:three_level_kubo}
+
+For the three-level clock, the initial state is
+$|\Psi_0\rangle=(|g\rangle+|m\rangle)/\sqrt{2}$ and the observable is
+$M = \sigma_y^{gm} = -i|g\rangle\langle m|+i|m\rangle\langle g|$.
+We consider probe-laser frequency noise described by the Hamiltonian
+$H_e = \beta_e(t)|e\rangle\langle e|$, which shifts only the optically excited state.
+The classical noise variance~\eqref{eq:kubo_general} then reads
+(derived in Supplemental Material, Sec.~SII):
+\be
+  \overline{\langle\delta M\rangle^2}_{\rm noise} = \int_{-\infty}^{\infty}\frac{d\omega}{2\pi}
+    \,S_{\beta_e}(\omega)\,\mathcal{F}_e(\omega)\,,
+  \label{eq:main_result}
+\ee
+with the probe-noise filter function
+\be
+  \boxed{\mathcal{F}_e(\omega) = |\mathcal{X}(\omega)|^2\,,
+  \qquad \mathcal{X}(\omega) = \int_0^T|G(t)|^2\,e^{-i\omega t}\,dt\,.}
+  \label{eq:Fe}
+\ee
+The filter function depends only on the population channel $\chi(t)=|G(t)|^2$;
+the coherence-channel contribution $|\Phi|^2$ from $F^*G$ drives quantum fluctuations
+in the off-diagonal density matrix but does not contribute to the variance of the
+classical signal mean $\langle M\rangle$ (see Supplemental Material, Sec.~SII.3).
+We restrict attention to probe noise throughout; noise on the clock transition
+$|m\rangle\langle m|$ (which produces a protocol-independent filter function) is
+discussed in Supplemental Material, Sec.~SII.5.
+
+The signal slope $\mathcal{S}=\partial_\delta\langle M\rangle|_{\delta=0}$
+receives contributions from both the global probe phase and the detuning
+dependence of the Cayley--Klein amplitudes in~\eqref{eq:propagator_3L}.
+The analytic formula for GPS protocols is derived in Supplemental Material,
+Sec.~SI; for general sequences $\mathcal{S}$ is evaluated numerically.
+
+\subsection{GPS protocol: signal and DC sensitivity}
 \label{sec:gps}
 
-Global Phase Spectroscopy (GPS) \cite{GPS} uses a three-level $\Lambda$ system
-with states $|g\rangle$, $|e\rangle$, $|m\rangle$, where:
-\begin{itemize}
-  \item $|g\rangle \leftrightarrow |e\rangle$: optical probe transition driven by the clock laser.
-  \item $|g\rangle \leftrightarrow |m\rangle$: RF (M1) clock transition with long coherence time,
-        used for readout via $M = \sigma_y^{gm}$.
-\end{itemize}
-The initial state is $|\Psi_0\rangle = (|g\rangle + |m\rangle)/\sqrt{2}$.
+Global Phase Spectroscopy (GPS) \cite{GPS} drives the $|g\rangle
+\leftrightarrow|e\rangle$ optical transition while reading out via the
+long-lived clock transition $M=\sigma_y^{gm}$.
+The GPS-$m$ sequence is a single continuous resonant drive at Rabi frequency
+$\Omega=2\pi m/T$ for total time $T$, completing exactly $m$ Rabi cycles.
 
-\subsubsection{GPS protocol and signal}
-
-The GPS-$m$ sequence consists of a single continuous resonant drive at Rabi frequency
-$\Omega = 2\pi m/T$ for time $T$ (so that $\Omega T = 2\pi m$, an integer number of
-complete Rabi cycles).
-With the correct Hamiltonian $H_\delta = \delta|e\rangle\langle e|$, the three-level clock
-signal is \cite{} (see Appendix~\ref{app:gps_sensitivity}):
+With the correct Hamiltonian $H_\delta=\delta|e\rangle\langle e|$, the
+three-level clock signal is (see Supplemental Material, Sec.~SI):
 \begin{align}
-  S(\delta) &= \sin\!\left(\frac{\delta T}{2}\right)\cos\!\left(\frac{\Omega_R T}{2}\right)
-            \nonumber \\
-            &\quad - \frac{\delta}{\Omega_R}\cos\!\left(\frac{\delta T}{2}\right)
+  S(\delta) &= \sin\!\left(\frac{\delta T}{2}\right)
+               \cos\!\left(\frac{\Omega_R T}{2}\right)
+  \nonumber \\
+            &\quad
+             -\frac{\delta}{\Omega_R}
+              \cos\!\left(\frac{\delta T}{2}\right)
               \sin\!\left(\frac{\Omega_R T}{2}\right)\,,
   \label{eq:gps_signal}
 \end{align}
-where $\Omega_R = \sqrt{\Omega^2 + \delta^2}$.
-This differs from the probe-subspace-traceless formula; the two agree only at $\delta = 0$
-where both vanish.  All protocols here operate at $\delta = 0$ (the quadrature point).
+where $\Omega_R=\sqrt{\Omega^2+\delta^2}$.
+This differs from the probe-subspace-traceless formula; the two agree only
+at $\delta=0$ where both vanish.
+All protocols operate at $\delta=0$ (the quadrature point).
 
-\subsubsection{All GPS protocols share the same DC sensitivity at $\delta=0$}
-\label{sec:gps_sens}
-
-Differentiating~\eqref{eq:gps_signal} and evaluating at $\delta=0$ (where $\Omega_R = \Omega$):
+Differentiating~\eqref{eq:gps_signal} and evaluating at $\delta=0$
+(where $\Omega_R\to\Omega$):
 \be
   \partial_\delta S\big|_{\delta=0}
   = \frac{T\,\Omega\,\cos(\Omega T/2) - 2\sin(\Omega T/2)}{2\Omega}\,.
   \label{eq:gps_deriv}
 \ee
-For GPS-$m$ with $\Omega T = 2\pi m$, we have $\sin(m\pi) = 0$ and $\cos(m\pi) = (-1)^m$, so
+For GPS-$m$ with $\Omega T=2\pi m$, $\sin(m\pi)=0$ and
+$\cos(m\pi)=(-1)^m$, so
 \be
-  \partial_\delta S\big|_{\delta=0}
-  = \frac{(-1)^m\, T}{2}\,,
+  \partial_\delta S\big|_{\delta=0} = \frac{(-1)^m T}{2}\,,
   \qquad
   |\partial_\delta S|^2 = \frac{T^2}{4} = \pi^2
-  \quad\forall\, m\,.
+  \quad\forall\,m\,.
   \label{eq:gps_sens_result}
 \ee
-\emph{All GPS protocols at $\delta=0$ have the same DC sensitivity as Ramsey.}
-The numerical values confirm this: for $T=2\pi$, all protocols give
-$|\mathcal{S}|^2 \approx \pi^2 \approx 9.87$ (Table~\ref{tab:fom}).
-Protocol differences in FOM therefore arise \emph{entirely} from differences in
-$\mathcal{K}(S_\beta)$, not from $\mathcal{S}^2$.
+\emph{All GPS protocols at $\delta=0$ share the same DC sensitivity as
+three-level Ramsey}: $|\mathcal{S}|^2 = T^2/4$ [Eq.~\eqref{eq:gps_sens_result}].
+Note that this three-level DC sensitivity is four times below the optimal two-level
+Ramsey sensitivity $|\mathcal{S}|^2 = T^2$ (Sec.~\ref{sec:ramsey});
+the double-$\pi$ QSP construction of Sec.~\ref{sec:qsp_results} recovers this factor.
+Protocol differences in $\sigma^2_\nu$ therefore arise \emph{entirely} from differences
+in the noise integral $\mathcal{V}(S_\beta)$, not from $\mathcal{S}^2$.
 
-\subsubsection{GPS filter function structure}
+\subsection{GPS filter function structure}
 \label{sec:gps_ff}
 
-At $\delta=0$, the CK amplitudes for a GPS-$m$ drive evolve as
-$f(t) = \cos(\Omega t/2)$, $g(t) = -i\sin(\Omega t/2)$.
-The two path functions are $\phi(t) = F^*G = -i\cos(\Omega t/2)\sin(\Omega t/2)$
-and $\chi(t) = |G|^2 = \sin^2(\Omega t/2)$.
-The Fourier transforms give:
+At $\delta=0$, the Cayley--Klein amplitudes for a GPS-$m$ drive evolve as
+$F(t)=\cos(\Omega t/2)$, $G(t)=-i\sin(\Omega t/2)$, giving path functions
+$\phi(t)=F^*G=-\tfrac{i}{2}\sin(\Omega t)$ and
+$\chi(t)=|G|^2=\tfrac{1}{2}[1-\cos(\Omega t)]$.
+Their Fourier transforms are computed from the standard integrals
+$\int_0^T \sin(\Omega t)\,e^{-i\omega t}\,dt$ and
+$\int_0^T [1-\cos(\Omega t)]\,e^{-i\omega t}\,dt$, giving
 \begin{align}
-  |\Phi(\omega)|^2 &\sim T^2/4\quad(\omega\to 0)\,,\text{ decreasing to zero above }\omega\sim\Omega\,,\\
-  |\mathcal{X}(\omega)|^2 &\sim \text{peaked at }\omega = \Omega\,,
+  |\Phi(\omega)|^2 &= \frac{T^2}{4}\,\mathrm{sinc}^2\!\!\left(\frac{(\omega-\Omega)T}{2}\right)
+    + \frac{T^2}{4}\,\mathrm{sinc}^2\!\!\left(\frac{(\omega+\Omega)T}{2}\right)\,,
+    \label{eq:Phi_GPS} \\
+  |\mathcal{X}(\omega)|^2 &= \frac{T^2}{4}\left[\mathrm{sinc}^2\!\!\left(\frac{\omega T}{2}\right)
+    + \mathrm{sinc}^2\!\!\left(\frac{(\omega-\Omega)T}{2}\right)\right]\,,
+    \label{eq:X_GPS}
 \end{align}
-so the GPS filter function $\mathcal{F}_e = \frac{1}{2}|\Phi|^2 + |\mathcal{X}|^2$ has a
-\emph{peak} at the Rabi frequency $\omega = \Omega$, not a null.
-This is a key clarification: previous analyses using the probe-subspace-traceless Hamiltonian
-predicted nulls at Rabi harmonics; these nulls disappear under the correct Hamiltonian.
-As a consequence, GPS-$m$ is \emph{most sensitive} to noise near $\omega\approx\Omega$, not
-suppressed there.
+where $\mathrm{sinc}(x)\equiv\sin(x)/x$.
+The coherence-channel term $|\Phi|^2$ is peaked at $\omega=\pm\Omega$ and falls
+as $(\omega\mp\Omega)^{-2}$ away from those peaks;
+$|\mathcal{X}|^2$ has peaks at $\omega=0$ and $\omega=\Omega$.
+The filter function $\mathcal{F}_e = |\mathcal{X}|^2$ therefore has a dominant
+\emph{peak} at the Rabi frequency $\omega=\Omega$, with additional weight near $\omega=0$.
+This is a key clarification: previous analyses using the probe-subspace-traceless
+Hamiltonian predicted nulls at Rabi harmonics; these nulls disappear under the
+correct Hamiltonian~\eqref{eq:H_delta} because the population channel $|\mathcal{X}|^2$
+places weight precisely at $\omega=\Omega$.
+Consequently, GPS-$m$ is \emph{most sensitive} to noise near $\omega\approx\Omega$.
 
-For GPS-$m$ compared to Ramsey under white noise:
-\begin{itemize}
-  \item GPS-$m$ concentrates $\mathcal{F}_e$ near $\omega=\Omega$ (the Rabi frequency),
-        while Ramsey has a broad $\omega^{-2}$ fall-off from low frequency.
-  \item For $m=1$ ($\Omega=1$) and $m=8$ ($\Omega=8$), the Kubo integrals under white
-        noise are $\mathcal{K}_w \approx 0.99$ and $1.01$, compared to Ramsey's $0.63$.
-        This gives GPS FOMs of $\approx 10$ vs.\ Ramsey's $15.6$.
-  \item Under $1/f$ noise, GPS-$8$ is more competitive ($\mathrm{FOM}_{1/f}=9.9$) than
-        GPS-$1$ ($5.4$) because the $1/f$ noise weight at $\omega=8$ is eight times smaller
-        than at $\omega=1$.
-\end{itemize}
-
-\subsection{Equiangular $N$-segment sequences}
-\label{sec:equiangular}
-
-The equiangular protocol generalizes GPS by dividing $T$ into $N$ equal segments of duration
-$\tau = T/N$, each a continuous drive at shared Rabi frequency $\Omega$ with independently
-optimized drive phases $\phi_k$:
-\be
-  \prod_{k=1}^{N} e^{-i(\Omega\tau/2)(\cos\phi_k\,\sigma_x + \sin\phi_k\,\sigma_y)}\,.
-  \label{eq:eq_seq}
-\ee
-GPS-$m$ is the special case $N=1$ (or $N=4$ with all $\phi_k$ equal).
-The free parameters $(\Omega, \phi_2,\ldots,\phi_N)$ are optimized to maximize
-$\mathrm{FOM}$ for a given noise model using differential evolution followed by L-BFGS-B
-polishing (described in Appendix~\ref{app:optimization}).
-
-For $N=4$ optimized under white noise, the numerical optimum is
-$\Omega T \approx 7.6$ with phases $\phi^* \approx [0, 1.44, 0.38, 1.11]$\,rad,
-giving $\mathrm{FOM}_w = 14.1$---about $10\%$ below Ramsey's $15.6$.
-The Rabi frequency $\Omega T \approx 7.6$ places the $\mathcal{F}_e$ peak
-slightly below $\omega=2$, reducing the low-frequency noise integral while maintaining sensitivity.
+The practical consequence for $\sigma^2_\nu$ is immediate (see Table~\ref{tab:fom}).
+Under white noise (bandlimited FOM, $\omega\geq 2\pi/T$), GPS-$m$ has
+$\sigma^2_{\nu,w}\approx 9.8\times10^{-3}$ ($m=1$) and $4.7\times10^{-2}$ ($m=8$),
+both exceeding Ramsey's $8.1\times10^{-3}$, showing that GPS couples more strongly to white noise.
+Under $1/f$ noise, GPS-$8$ is more competitive because the $1/f$
+spectral weight at $\omega=8$ is eight times smaller than at $\omega=1$.
+The full quantitative comparison across all protocols and noise models is
+presented in Sec.~\ref{sec:analytics}.
 
 % ============================================================
 \section{Protocol Comparison}
 \label{sec:analytics}
 % ============================================================
 
-This section presents the full numerical comparison of clock protocols under three
-noise models.  All filter functions are computed via FFT of the temporal QSP path
-functions $\phi(t) = F^*(t)G(t)$ and $\chi(t) = |G(t)|^2$ over the time grid
-$t_k = k\,T/N_{\rm FFT}$ ($N_{\rm FFT}=4096$, zero-padded by $\times 4$).
+This section presents the full quantitative comparison of clock protocols under
+the three noise environments defined in Sec.~\ref{sec:fom}.
+We pursue two objectives.
+First, we compare the FOM across the four protocol classes---Ramsey, GPS,
+equiangular, and pulsed QSP---using exact numerical filter functions, and extract
+design principles for matching protocols to noise environments.
+Second, we validate the filter-function and FOM calculations numerically,
+confirming that the results of Table~\ref{tab:fom} are quantitatively reliable
+within the linear-response regime.
+Section~\ref{sec:protocol_classes} introduces the two optimizable protocol
+families evaluated here.
+Sections~\ref{sec:filter_functions_comparison}--\ref{sec:qsp_results} present
+the comparison across noise models.
+Section~\ref{sec:numerics} closes with numerical validation.
 
+
+% ------------------------------------------------------------
+\subsection{Protocol classes}
+\label{sec:protocol_classes}
+% ------------------------------------------------------------
+
+Three protocol classes are evaluated alongside Ramsey and GPS as fixed
+analytic baselines.
+
+\paragraph{Equiangular $N$-segment sequences.}
+The equiangular protocol generalizes GPS by dividing $T$ into $N$ equal
+segments of duration $\tau = T/N$, each a continuous drive at a shared Rabi
+frequency $\Omega$ with independently optimized phases $\phi_k$:
+\be
+  \prod_{k=1}^{N}
+    e^{-i(\Omega\tau/2)(\cos\phi_k\,\sigma_x + \sin\phi_k\,\sigma_y)}\,.
+  \label{eq:eq_seq}
+\ee
+GPS-$m$ is the degenerate case $N=1$ (a single uninterrupted drive).
+The free parameters $(\Omega,\phi_2,\ldots,\phi_N)$ are optimized to maximize
+FOM for a given noise model using differential evolution followed by L-BFGS-B
+polishing (Supplemental Material, Sec.~SVI).
+For $N=4$ optimized under white noise using the positive-definite
+objective~\eqref{eq:score_inv} (bandlimited from $\omega_{\min}=2\pi/T$),
+the numerical optimum is $\Omega T \approx 8.96$ with phases
+$\phi^*\approx[4.14,\;4.14,\;1.00,\;1.00]$\,rad, giving
+$\mathcal{F}_e(0)=14.62$ and $\sigma^2_{\nu,w}=7.46\times10^{-3}$---comparable to
+Ramsey's $7.67\times10^{-3}$.
+Larger segments ($N=8$, $N=16$) achieve higher sensitivity
+$\mathcal{F}_e(0)\approx22.5$ and $26.6$, and lower $\sigma^2_{\nu,w}=5.78\times10^{-3}$
+and $5.75\times10^{-3}$, respectively; both exceed Ramsey by $\approx 1.3\times$.
+The optimized Rabi frequency places the $\mathcal{F}_e$ peak to reduce
+the low-frequency noise integral while building up DC sensitivity.
+Equiangular sequences are \emph{continuous-drive} protocols: $F(t)$ and $G(t)$
+trace smooth arcs on the SU(2) manifold throughout each segment.
+
+\paragraph{Pulsed QSP sequences.}
+Pulsed QSP sequences consist of $n$ fast rotations
+$R(\theta_j,\phi_j) = e^{-i(\theta_j/2)(\cos\phi_j\,\sigma_x+\sin\phi_j\,\sigma_y)}$
+separated by $n-1$ equal free-evolution gaps of duration $\tau_{\rm free}$,
+as defined in Sec.~\ref{sec:qsp_pulsed}.
+Unlike equiangular sequences, the path functions $\phi(t)=F^*G$ and $\chi(t)=|G|^2$
+are \emph{piecewise constant} between pulses: the SU(2) amplitudes freeze during
+free evolution and are stepped instantaneously at each rotation.
+The $2n-1$ free parameters $(\theta_1,\ldots,\theta_n,\phi_2,\ldots,\phi_n)$ are
+optimized independently for each noise model using the same two-stage algorithm
+as equiangular (Supplemental Material, Sec.~SVI).
+For $n=3,5,9$, the optimizer consistently recovers the universal double-$\pi$
+structure $\theta\approx[\pi,\;0,\;\ldots,\;0,\;\pi]$ regardless of the noise model,
+which we identify below as a maximum-sensitivity configuration.
+
+
+% ------------------------------------------------------------
 \subsection{Filter functions}
+\label{sec:filter_functions_comparison}
+% ------------------------------------------------------------
 
-Figure~\ref{fig:filter_functions} shows $\mathcal{F}_e(\omega)/T^2$ for all protocols
-at $\delta=0$, $T=2\pi$.
-The qualitative structure matches the analytic predictions of Sec.~\ref{sec:gps_ff}:
+Figure~\ref{fig:filter_functions} shows $\mathcal{F}_e(\omega)/T^2$ for all
+protocols at $\delta=0$, $T=2\pi$.
+The qualitative structure matches the analytic predictions of
+Sec.~\ref{sec:gps_ff}:
 \begin{itemize}
-  \item \textbf{Ramsey} has a broad, nearly flat $\mathcal{F}_e\approx T^2/4$ at low frequencies,
-        with $\omega^{-2}$ roll-off above $\omega\sim 1/\tau_{\rm free}$.
-  \item \textbf{GPS $m=1$} ($\Omega=1$) has $\mathcal{F}_e$ concentrated near $\omega=1$
-        with very little weight above $\omega\approx 4$.
+  \item \textbf{Ramsey} has a broad, nearly flat $\mathcal{F}_e\approx T^2/4$
+        at low frequencies, with $\omega^{-2}$ roll-off above
+        $\omega\sim 1/\tau_{\rm free}$.
+  \item \textbf{GPS $m=1$} ($\Omega=1$) has $\mathcal{F}_e$ concentrated near
+        $\omega=1$ with very little weight above $\omega\approx 4$.
   \item \textbf{GPS $m=8$} ($\Omega=8$) has $\mathcal{F}_e$ peaked at $\omega=8$
-        and its first harmonic $\omega=16$; significant weight also exists at intermediate
-        frequencies $1\lesssim\omega\lesssim 8$.
-  \item \textbf{Equiangular $N=4$} (white-noise optimized) sits below Ramsey across
-        the mid-frequency range $0.3\lesssim\omega\lesssim 5$, giving a smaller
-        $\mathcal{K}_w$ than all GPS protocols but not as good as Ramsey itself.
+        and its first harmonic $\omega=16$; significant weight also exists at
+        intermediate frequencies $1\lesssim\omega\lesssim 8$.
+  \item \textbf{Equiangular $N=4$} (white-noise optimized) sits below Ramsey
+        across the mid-frequency range $0.3\lesssim\omega\lesssim 5$, giving a
+        smaller $\mathcal{K}_w$ than all GPS protocols but larger than Ramsey.
 \end{itemize}
 
 \begin{figure}[t]
@@ -600,70 +912,126 @@ The qualitative structure matches the analytic predictions of Sec.~\ref{sec:gps_
   \caption{%
     Filter functions $\mathcal{F}_e(\omega)/T^2$ for the four reference protocols
     at $T=2\pi$, $\delta=0$.
-    Vertical dotted lines mark the Rabi harmonics of GPS $m=1$ (blue) and GPS $m=8$ (green).
+    Vertical dotted lines mark the Rabi harmonics of GPS $m=1$ (blue) and
+    GPS $m=8$ (green).
     GPS $\mathcal{F}_e$ is \emph{peaked} at the Rabi frequency, not nulled.
     Computed via Eqs.~\eqref{eq:Fe}--\eqref{eq:Chi}.%
   }
   \label{fig:filter_functions}
 \end{figure}
 
-\subsection{Full FOM table}
-\label{sec:fom_table}
 
-Table~\ref{tab:fom} summarizes the FOM for all protocols under the three noise models.
-The pulsed QSP sequences (Section~\ref{sec:qsp_pulsed}) are optimized independently
-for each noise model.
-Reference protocols (Ramsey, GPS, equiangular) use the same parameters for all three
-noise evaluations.
+% ------------------------------------------------------------
+\subsection{FOM results and design principles}
+\label{sec:fom_table}
+% ------------------------------------------------------------
+
+Table~\ref{tab:fom} summarizes the FOM for all protocols under the three
+noise models.
+Pulsed QSP sequences are optimized independently for each noise model;
+reference protocols (Ramsey, GPS, equiangular) use the same parameters across
+all three evaluations.
 
 \begin{table}[t]
 \centering
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \toprule
-Protocol & White & $1/f$ & High-pass \\
-         &       &       & ($\omega_c=2$) \\
+Protocol & $\mathcal{F}_e(0)$ & White & $1/f$ & High-pass \\
+         &                    &       &       & ($\omega_c=2$) \\
 \midrule
-Ramsey               & 15.6 &  7.2 & 160 \\
-GPS $m{=}1$          & 10.0 &  5.4 & 3746 \\
-GPS $m{=}8$          &  9.8 &  9.9 & 16 \\
-Equiangular $N{=}4$  & 14.1 &  6.9 & 191 \\
+Ramsey               & $9.81$  & $7.67\times10^{-3}$ & $3.59\times10^{-3}$ & $3.91\times10^{-3}$ \\
+GPS $m{=}1$          & $9.87$  & $9.79\times10^{-3}$ & $8.29\times10^{-3}$ & $6.2\times10^{-5}$  \\
+GPS $m{=}8$          & $9.87$  & $4.73\times10^{-2}$ & $9.02\times10^{-3}$ & $4.33\times10^{-2}$ \\
+Equiangular $N{=}4$  & $14.62$ & $7.46\times10^{-3}$ & $4.61\times10^{-3}$ & $3.37\times10^{-3}$ \\
+Equiangular $N{=}8$  & $22.47$ & $5.78\times10^{-3}$ & $3.23\times10^{-3}$ & $2.28\times10^{-3}$ \\
+Equiangular $N{=}16$ & $26.55$ & $5.75\times10^{-3}$ & $3.00\times10^{-3}$ & $2.88\times10^{-3}$ \\
 \midrule
-QSP $n{=}3$          & 44.5 & 29.9 & 367 \\
-QSP $n{=}5$          & 52.5 & 48.6 & 450 \\
-QSP $n{=}9$          & 56.1 & 36.7 & 917 \\
+QSP $n{=}3$  & $38.85$ & $7.58\times10^{-3}$ & $3.59\times10^{-3}$ & $3.80\times10^{-3}$ \\
+QSP $n{=}5$  & $38.85$ & $7.59\times10^{-3}$ & $3.59\times10^{-3}$ & $3.81\times10^{-3}$ \\
+QSP $n{=}9$  & $38.81$ & $7.57\times10^{-3}$ & $3.59\times10^{-3}$ & $3.81\times10^{-3}$ \\
 \bottomrule
 \end{tabular}
 \caption{%
-  FOM $= |\mathcal{S}|^2/\mathcal{K}$ for all protocols at $T=2\pi$, $\delta=0$.
-  All $|\mathcal{S}|^2 \approx \pi^2 \approx 9.87$ (Eq.~\eqref{eq:gps_sens_result}).
-  QSP sequences are independently optimized for each noise model;
-  white-noise FOM for $n=9$ uses the sequence optimized for white noise
-  (see Table~\ref{tab:qsp_params}).
-  GPS $m{=}1$ is nearly optimal for high-pass noise because its filter function
-  is concentrated almost entirely below $\omega_c=2$.
-  Pulsed QSP achieves $3$--$7\times$ improvement over all continuous-drive protocols
-  for white and $1/f$ noise.%
+  Bandlimited $\sigma^2_\nu = \mathcal{V}/\mathcal{F}_e(0)$ (lower is better)
+  for all protocols at $T=2\pi$, $\delta=0$,
+  using $\omega_{\min}=2\pi/T$ (Eq.~\eqref{eq:fom}).
+  Filter function $\mathcal{F}_e(\omega) = |\mathcal{X}(\omega)|^2$;
+  $\mathcal{F}_e(0) = |\partial_\delta\langle M\rangle|^2_{\delta=0}$
+  is the squared signal slope (DC consistency condition~\eqref{eq:dc_consistency}).
+  For Ramsey and GPS at $\delta{=}0$, $\mathcal{F}_e(0)=T^2/4\approx9.87$.
+  Equiangular sequences and QSP are optimized for each noise model via the
+  positive-definite objective~\eqref{eq:score_inv}.
+  QSP $n{=}3,5,9$ all reach $\mathcal{F}_e(0)\approx T^2=4\pi^2$ via the
+  double-$\pi$ mechanism, providing $4\times$ higher DC sensitivity than Ramsey.%
 }
 \label{tab:fom}
 \end{table}
 
-\subsection{High-frequency noise analysis}
+The results of Table~\ref{tab:fom} establish a quantitative hierarchy of clock
+protocols that depends on the noise environment.
+No single protocol is universally optimal; the appropriate choice must be
+matched to the dominant noise mechanism.
+\begin{enumerate}
+  \item \textbf{White noise.}
+        Ordering (lower $\sigma^2_\nu$ is better):
+        Eq.\,$N{=}8$ $\approx$ Eq.\,$N{=}16$ $<$ Eq.\,$N{=}4$ $\approx$ QSP $\approx$ Ramsey
+        $<$ GPS $m{=}1$ $\ll$ GPS $m{=}8$.
+        Equiangular sequences with $N{=}8,16$ achieve the lowest white-noise
+        $\sigma^2_\nu\approx5.8\times10^{-3}$, roughly $1.3\times$ below Ramsey.
+        Both GPS protocols are worse than Ramsey because the single continuous
+        drive concentrates $\mathcal{F}_e$ near the Rabi harmonic, contributing
+        heavily to the noise integral under a flat noise spectrum.
+        QSP sequences ($n=3,5,9$) achieve $\sigma^2_\nu\approx7.6\times10^{-3}$,
+        comparable to Ramsey; their primary advantage is the $4\times$ higher
+        DC sensitivity $\mathcal{F}_e(0)\approx T^2$ (Sec.~\ref{sec:qsp_results}),
+        which widens the dynamic range and reduces the impact of measurement noise.
+  \item \textbf{$1/f$ noise.}
+        Ordering (lower $\sigma^2_\nu$ is better):
+        Eq.\,$N{=}16$ $<$ Eq.\,$N{=}8$ $<$ Ramsey $\approx$ QSP $<$ Eq.\,$N{=}4$
+        $<$ GPS $m{=}1$ $<$ GPS $m{=}8$.
+        Because $1/f$ noise concentrates power at low frequencies, protocols
+        whose $\mathcal{F}_e$ is shifted to higher frequencies are advantaged.
+        Equiangular sequences perform best: $N{=}16$ gives
+        $\sigma^2_{\nu,1/f}=3.0\times10^{-3}$, roughly $1.2\times$ below Ramsey.
+        GPS-$1$ ($8.3\times10^{-3}$) is worse than GPS-$8$ ($9.0\times10^{-3}$)
+        for $1/f$ noise---reversed from the white-noise ordering---because GPS-$1$'s
+        filter function overlaps heavily with the low-frequency $1/f$ spectral weight.
+        QSP sequences match Ramsey in $\sigma^2_\nu\approx3.6\times10^{-3}$.
+  \item \textbf{High-pass noise ($\omega_c=2$).}
+        GPS-$1$ is near-optimal: its filter function is almost entirely contained
+        below $\omega_c=2$, giving $\sigma^2_{\nu,\rm hp}\approx6\times10^{-5}$
+        (roughly $60\times$ better than Ramsey).
+        GPS-$8$ performs worst ($4.3\times10^{-2}$) because its filter function
+        peaks far above the cutoff.
+        Equiangular $N{=}8$ achieves $\sigma^2_\nu=2.3\times10^{-3}$,
+        the best among the optimized protocols.
+        QSP sequences ($3.8\times10^{-3}$) are comparable to Ramsey ($3.9\times10^{-3}$)
+        for this noise model.
+\end{enumerate}
+These design principles are further illustrated by the detailed noise-model
+analyses in Secs.~\ref{sec:hf_noise} and~\ref{sec:lorentzian_noise} below.
 
-Figure~\ref{fig:hf_cutoff} shows the FOM as a function of the high-pass noise cutoff $\omega_c$,
-sweeping from $\omega_c=0$ (full white noise) to $\omega_c=28$\,rad/s.
+\subsubsection{High-frequency noise analysis}
+\label{sec:hf_noise}
+
+Figure~\ref{fig:hf_cutoff} shows the FOM as a function of the high-pass noise
+cutoff $\omega_c$, sweeping from $\omega_c=0$ (full white noise) to
+$\omega_c=28$\,rad/s.
 Several features emerge:
 \begin{enumerate}
   \item \textbf{GPS $m=1$ diverges rapidly above $\omega_c\approx 1$.}
-        Once the cutoff exceeds the Rabi frequency $\Omega_1=1$, almost all noise
-        is excluded from the Kubo integral, and $\mathrm{FOM}\to\infty$.
-        This makes GPS-$1$ nearly ideal for any high-pass noise environment with
-        $\omega_c > \Omega_1$: the filter function is largely contained below the cutoff.
-  \item \textbf{GPS $m=8$ drops sharply when $\omega_c$ passes through its harmonics.}
-        At $\omega_c = 8k$ for $k=1,2,3,\ldots$, the cutoff crosses a $\mathcal{F}_e$ peak,
-        causing the Kubo integral to rise steeply and the FOM to drop.
-  \item \textbf{Equiangular $N=4$} and \textbf{Ramsey} show intermediate behavior, with
-        FOM rising smoothly as $\omega_c$ increases past $\Omega\approx 1.3$ and $1/T\approx 0.16$
-        respectively.
+        Once the cutoff exceeds the Rabi frequency $\Omega_1=1$, almost all
+        noise is excluded from the Kubo integral, and $\mathrm{FOM}\to\infty$.
+        This makes GPS-$1$ nearly ideal for any high-pass noise environment
+        with $\omega_c > \Omega_1$.
+  \item \textbf{GPS $m=8$ drops sharply when $\omega_c$ passes through its
+        harmonics.}
+        At $\omega_c = 8k$ for $k=1,2,3,\ldots$, the cutoff crosses a
+        $\mathcal{F}_e$ peak, causing the Kubo integral to rise steeply and
+        the FOM to drop.
+  \item \textbf{Equiangular $N=4$} and \textbf{Ramsey} show intermediate
+        behavior, with FOM rising smoothly as $\omega_c$ increases past
+        $\Omega\approx 1.3$ and $1/T\approx 0.16$ respectively.
 \end{enumerate}
 
 \begin{figure}[t]
@@ -675,68 +1043,68 @@ Several features emerge:
     All protocols at $T=2\pi$, $\delta=0$.
     GPS $m=1$ FOM diverges rapidly once $\omega_c > \Omega=1$, making it
     nearly optimal for band-limited noise.
-    GPS $m=8$ shows sharp drops at $\omega_c=8,16,24$ (its $\mathcal{F}_e$ peak harmonics).
+    GPS $m=8$ shows sharp drops at $\omega_c=8,16,24$ (its $\mathcal{F}_e$
+    peak harmonics).
     Vertical dotted lines mark GPS $m=8$ harmonics.%
   }
   \label{fig:hf_cutoff}
 \end{figure}
 
+\subsubsection{Lorentzian noise}
+\label{sec:lorentzian_noise}
+
 Figure~\ref{fig:lorentzian} shows the FOM for a narrow Lorentzian noise peak
-$S(\omega) = \Gamma^2/[(\omega-\omega_{\rm peak})^2+\Gamma^2]$ ($\Gamma=0.3$\,rad/s)
-as a function of $\omega_{\rm peak}$.
-GPS-$8$ is \emph{worst} at $\omega_{\rm peak} = 8$\,rad/s: its filter function peaks there,
-giving maximal coupling to a technical noise source at that frequency.
-Equiangular $N=4$ achieves the best average suppression across Lorentzian peak positions
-because its filter function avoids the discrete harmonics of GPS.
+$S(\omega) = \Gamma^2/[(\omega-\omega_{\rm peak})^2+\Gamma^2]$
+($\Gamma=0.3$\,rad/s) as a function of $\omega_{\rm peak}$.
+GPS-$8$ is \emph{worst} at $\omega_{\rm peak}=8$\,rad/s: its filter function
+peaks there, giving maximal coupling to a technical noise source at that
+frequency.
+Equiangular $N=4$ achieves the best average suppression across Lorentzian
+peak positions because its filter function avoids the discrete harmonics
+of GPS.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{hf_noise_lorentzian.pdf}
   \caption{%
-    FOM under a Lorentzian noise peak ($\Gamma=0.3$) as a function of peak position
-    $\omega_{\rm peak}$.
+    FOM under a Lorentzian noise peak ($\Gamma=0.3$) as a function of peak
+    position $\omega_{\rm peak}$.
     All protocols at $T=2\pi$, $\delta=0$.
-    GPS $m=8$ has its minimum FOM at $\omega_{\rm peak}=8$ (its $\mathcal{F}_e$ peak):
-    the protocol is \emph{maximally sensitive} to technical noise at the Rabi harmonic.
+    GPS $m=8$ has its minimum FOM at $\omega_{\rm peak}=8$ (its
+    $\mathcal{F}_e$ peak): the protocol is \emph{maximally sensitive} to
+    technical noise at the Rabi harmonic.
     Dotted lines mark GPS $m=8$ harmonics (green) and $m=1$ harmonics (blue).%
   }
   \label{fig:lorentzian}
 \end{figure}
 
-\subsection{Pulsed QSP sequences: CPMG-like spin echo}
-\label{sec:qsp_results}
 
-Figure~\ref{fig:qsp_comparison} shows the filter functions of QSP $n=3,5,9$ sequences
-alongside the reference protocols, for each of the three noise models.
+% ------------------------------------------------------------
+\subsection{Pulsed QSP sequences: double-$\pi$ maximum-sensitivity structure}
+\label{sec:qsp_results}
+% ------------------------------------------------------------
+
+\LZ{I am very skeptical of the figure-of-merit claims made here. Looking at Fig 4, I can tell that DC sensitivity is getting substantially lower than Ramsey and GPS for these QSP sequences. At the same time, the asymptotic decay towards high frequencies seems to be slower than in e.g. Ramsey. This means the sequence cannot discriminate the constant detuning well (which is primary objective when running a clock), and doesn't do good job averaging the high frequency noise (which is the only room for improvement left over Ramsey sequence).}
+
+Figure~\ref{fig:qsp_comparison} shows the filter functions of QSP $n=3,5,9$
+sequences alongside the reference protocols for each of the three noise models.
 Table~\ref{tab:qsp_params} lists the optimized pulse parameters.
 
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{qsp_comparison.pdf}
   \caption{%
-    Filter functions $\mathcal{F}_e(\omega)/T^2$ for all protocols, with noise PSD
-    (dotted, normalized for visibility) overlaid.
-    Left: white noise. Center: $1/f$ noise. Right: high-pass noise ($\omega_c=2$).
-    Each QSP sequence is optimized for the noise model of its panel.
-    QSP filter functions are concentrated well below $\omega=2$, giving high
-    suppression of noise above that frequency.%
+    Filter functions $\mathcal{F}_e(\omega)/T^2$ for all protocols, with noise
+    PSD (dotted, normalized for visibility) overlaid.
+    Left: white noise. Center: $1/f$ noise. Right: high-pass noise
+    ($\omega_c=2$).
+    Each QSP sequence is optimized for the noise model of its panel
+    but converges to the same double-$\pi$ structure in all cases.
+    QSP filter functions are $4\times$ taller than Ramsey at $\omega=0$
+    ($\mathcal{F}_e(0)\approx T^2$ vs.\ $T^2/4$), reflecting the higher DC sensitivity.%
   }
   \label{fig:qsp_comparison}
 \end{figure*}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\columnwidth]{qsp_fom_bars.pdf}
-  \caption{%
-    FOM bar chart comparing all protocols under the three noise models
-    (Table~\ref{tab:fom}).
-    Pulsed QSP $n=3,5,9$ bars are shown for the sequence optimized for each
-    respective noise model.
-    Continuous-drive protocols (Ramsey, GPS, equiangular) are evaluated at fixed
-    parameters under all three noise models.%
-  }
-  \label{fig:qsp_bars}
-\end{figure}
 
 \begin{table}[t]
 \centering
@@ -744,109 +1112,114 @@ Table~\ref{tab:qsp_params} lists the optimized pulse parameters.
 \toprule
 Protocol & $\tau_{\rm free}$ & Pulse angles / phases \\
 \midrule
-Ramsey ($n=2$) & 6.23 & $\theta=[{\pi}/{2},{\pi}/{2}]$, $\phi=[0,0]$ \\
+Ramsey ($n=2$) & 6.23 &
+  $\theta=[\pi/2,\,\pi/2]$, $\phi=[0,\,0]$ \\
 \midrule
-QSP $n=3$ (white) & 3.11 &
-  $\theta\approx[0.71, 0.19, 2.90]$ \\
-  && $\phi\approx[0, 1.68, 3.23]$ \\
-QSP $n=5$ (white) & 1.56 &
-  $\theta\approx[0.54, 0.21, 0.13, 0.22, 2.68]$ \\
-  && $\phi\approx[0, 1.08, 1.88, 2.70, 3.48]$ \\
-QSP $n=9$ (white) & 0.78 &
-  $\theta\approx[0.49, 0.22, 0.14, *, *, 0.16, *, 0.30, 2.49]$ \\
-  && (* denotes $\theta\approx 0.01$, near-zero pulse) \\
+QSP $n=3$ & 3.09 &
+  $\theta\approx[\pi,\;0,\;\pi]$, $\phi\approx[0,\;0,\;0]$ \\
+QSP $n=5$ & 1.55 &
+  $\theta\approx[\pi,\;0,\;0,\;0,\;\pi]$, $\phi\approx[0,\;0,\;0,\;0,\;0]$ \\
+QSP $n=9$ & 0.77 &
+  $\theta\approx[\pi,\;0,\;\ldots,\;0,\;\pi]$, $\phi\approx[0,\;\ldots,\;0]$ \\
 \bottomrule
 \end{tabular}
 \caption{%
-  Optimized parameters for pulsed QSP sequences at $T=2\pi$, $\Omega_{\rm fast}=20\pi$.
-  The free-evolution time $\tau_{\rm free}=(T-\sum\tau_j)/(n-1) \approx T/(n-1)$
-  (pulses are short, $\tau_j\ll\tau_{\rm free}$).
-  All sequences have a large final angle $\theta_n\approx 0.85$--$0.92\pi$,
-  identifying them as partial spin-echo (CPMG-like) refocusing sequences.%
+  Optimized parameters for pulsed QSP sequences at $T=2\pi$,
+  $\Omega_{\rm fast}=20\pi$.
+  The free-evolution time
+  $\tau_{\rm free}\approx(T-2\pi/\Omega_{\rm fast})/(n-1)$
+  (the two near-$\pi$ pulses consume duration $\approx\pi/\Omega_{\rm fast}$ each).
+  All three noise models (white, $1/f$, high-pass) yield essentially identical
+  parameters, reflecting the universal double-$\pi$ structure.
+  Middle pulses are near-zero ($\theta\approx 0.01$, the numerical lower bound).%
 }
 \label{tab:qsp_params}
 \end{table}
 
-The most striking feature of the optimization is the consistently large final pulse:
-$\theta_n \approx 0.85$--$0.92\pi$.  This identifies the QSP sequences as
-\emph{partial spin-echo} sequences (Fig.~\ref{fig:qsp_comparison}):
+The most striking feature of the optimization is the universal \emph{double-$\pi$}
+structure $\theta\approx[\pi,\;0,\;\ldots,\;0,\;\pi]$, $\phi\approx 0$,
+across all values of $n$ and all noise models.
+This structure achieves maximum DC sensitivity through the following mechanism:
 \begin{enumerate}
-  \item The first pulse ($\theta_1 \approx \pi/2$--$\pi/4$) places the Bloch vector
-        in the equatorial plane.
-  \item Free evolution for duration $\tau_{\rm free}$ accumulates detuning-dependent phase.
-  \item Intervening small pulses ($n>3$) provide intermediate corrections.
-  \item The near-$\pi$ final pulse partially refocuses the accumulated phase, creating
-        a partial spin echo: the filter function vanishes at $\omega=0$ and is suppressed
-        at low frequencies, at the cost of reduced (but nonzero) sensitivity.
+  \item The first near-$\pi$ pulse maps $|g\rangle \to |e\rangle$ in the probe
+        subspace, placing the state entirely in the excited state.
+  \item Free evolution under $H_\delta = \delta|e\rangle\langle e|$ for duration
+        $\tau_{\rm free}\approx T$ accumulates a full phase $\delta T$ on $|e\rangle$,
+        rather than the half-phase $\delta T/2$ accumulated by the equatorial
+        superposition in standard Ramsey spectroscopy.
+  \item The near-zero intermediate pulses ($n>3$) serve only as time dividers;
+        they contribute no additional rotation.
+  \item The final near-$\pi$ pulse maps $|e\rangle$ back toward $|g\rangle$,
+        closing the sequence.
 \end{enumerate}
-The gain in FOM comes from the dramatic reduction in the Kubo noise integral: for white
-noise, QSP $n=3$ achieves $\mathcal{K}_w \approx 0.10$ vs.\ Ramsey's $\mathcal{K}_w \approx 0.63$,
-a $6.1\times$ reduction.  The near-$\pi$ final pulse also partially refocuses the
-detuning-dependent signal, reducing the sensitivity to
-$|\mathcal{S}|^2_{\rm QSP,n=3} \approx 4.6$ vs.\ Ramsey's $9.8$ (a $2.1\times$ reduction).
-The two effects combine multiplicatively:
-\be
-  \frac{\mathrm{FOM}_{\rm QSP}}{\mathrm{FOM}_{\rm Ramsey}}
-  = \frac{|\mathcal{S}|^2_{\rm QSP}}{|\mathcal{S}|^2_{\rm Ramsey}}
-    \times \frac{\mathcal{K}_{\rm Ramsey}}{\mathcal{K}_{\rm QSP}}
-  \approx \frac{4.6}{9.8} \times \frac{0.63}{0.10} \approx 2.84\,,
-  \label{eq:fom_gain}
-\ee
-a $2.84\times$ net improvement.
+The doubled phase accumulation gives a $2\times$ larger signal slope
+$\mathcal{S}_{\rm QSP}\approx T$ versus $\mathcal{S}_{\rm Ramsey}=T/2$,
+and hence a $4\times$ larger DC sensitivity
+$\mathcal{F}_e(0)\approx T^2\approx 4\pi^2$ versus $T^2/4$ for Ramsey
+(Table~\ref{tab:fom}, Fig.~\ref{fig:two_vs_three}).
+This is the same $\mathcal{F}_e(0)=T^2$ achieved by an optimal two-level Ramsey
+sequence; the double-$\pi$ QSP closes the factor-of-4 gap between the three-level
+$\Lambda$ system and the two-level qubit.
 
-For $1/f$ noise, the improvement is even larger ($\approx 7\times$ for $n=5$) because
-$1/f$ noise is concentrated at low frequencies where the spin-echo refocusing provides
-the greatest suppression.
+Importantly, the $\sigma^2_\nu$ metric~\eqref{eq:fom} is approximately the same for
+QSP and three-level Ramsey ($\approx7.6\times10^{-3}$ for white noise):
+the filter function is taller by $4\times$ but the shape is similar,
+so $\mathcal{V}$ and $\mathcal{F}_e(0)$ scale together and their ratio is
+unchanged.
+The physical advantage of the higher sensitivity lies outside the Kubo linear-response
+regime: a steeper fringe widens the dynamic range and improves robustness to
+measurement noise (photon shot noise, detection efficiency), which appears in
+the frequency variance as an additional offset not captured by $\mathcal{V}/\mathcal{F}_e(0)$.
+Numerical values for all $n$ are given in Table~\ref{tab:fom}.
 
-\subsection{Physical interpretation and design principles}
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{two_vs_three_kubo.pdf}
+  \caption{%
+    Filter functions $\mathcal{F}_e(\omega)/T^2$ at $T=2\pi$, $\delta=0$.
+    \emph{Black dashed}: analytic 2-level Ramsey with optimal observable
+    ($M=\sigma_y$, $H_\delta=\beta|e\rangle\langle e|$),
+    $\mathcal{F}_e(0)=T^2$ (Eq.~\eqref{eq:F_ramsey}).
+    \emph{Red}: 3-level Ramsey, $\mathcal{F}_e(0)=T^2/4$.
+    \emph{Blue/green}: 3-level GPS $m=1,8$.
+    \emph{Orange}: 3-level double-$\pi$ QSP $n=3$, $\mathcal{F}_e(0)\approx T^2$,
+    matching the 2-level reference.
+    Vertical dotted lines: GPS harmonics.%
+  }
+  \label{fig:two_vs_three}
+\end{figure}
 
-The results of Table~\ref{tab:fom} establish a hierarchy of clock protocols:
-\begin{enumerate}
-  \item \textbf{White noise}: Pulsed QSP ($n\geq 3$) $\gg$ Ramsey $>$ Equiangular $N=4$ $>$ GPS.
-        The CPMG-like structure reduces the low-frequency noise integral dramatically.
-  \item \textbf{$1/f$ noise}: Pulsed QSP ($n=5$) $\gg$ GPS-$8$ $\gg$ GPS-$1$.
-        The GPS-$8$ advantage over GPS-$1$ arises because $1/f$ noise weights low frequencies
-        heavily; pushing $\mathcal{F}_e$ to $\omega=8$ reduces the $1/f$ integral by $8\times$.
-        Pulsed QSP outperforms GPS-$8$ because it further suppresses low-$\omega$ noise
-        via the echo structure.
-  \item \textbf{High-pass noise}: GPS $m=1$ $\gg$ QSP $n=9$ $>$ others.
-        GPS-$1$'s filter function is almost entirely below $\omega_c=2$, giving
-        $\mathcal{K}_{\rm hp}\approx 0$; the FOM diverges.
-        Pulsed QSP also performs well because the free-evolution-dominated filter function
-        is concentrated at $\omega\sim\pi/\tau_{\rm free}$, which for $n=9$ falls
-        near $\omega\approx 4$, somewhat above $\omega_c=2$ but still yielding
-        large suppression.
-\end{enumerate}
-These results demonstrate that no single protocol is universally optimal: the best choice
-depends on the noise environment.  For practical clocks, the relevant protocol should be
-selected based on a characterization of the LO noise spectrum.
-
+% ------------------------------------------------------------
 \subsection{Numerical validation}
 \label{sec:numerics}
+% ------------------------------------------------------------
 
-All filter functions are computed via FFT of the exact propagator accumulated over the
-time grid ($N_{\rm FFT}=4096$, zero-padding $\times 4$), without linearization.
-The sensitivity $\mathcal{S} = \partial_\delta\langle M\rangle|_{\delta=0}$ is evaluated
-by numerical differentiation with step $\Delta\delta = 10^{-5}$.
-The Kubo integrals are computed by Simpson's rule over the FFT frequency grid.
-Details of the optimization algorithm are given in Appendix~\ref{app:optimization}.
+All filter functions are computed via FFT of the exact propagator over a time
+grid with $N_{\rm FFT}=4096$ points and zero-padding factor $4$, without
+linearization.
+The sensitivity $\mathcal{S}=\partial_\delta\langle M\rangle|_{\delta=0}$ is
+evaluated by numerical differentiation with step $\Delta\delta=10^{-5}$.
+Kubo integrals are computed by Simpson's rule over the FFT frequency grid.
+Details of the optimization algorithm are given in Supplemental Material,
+Sec.~SVI.
 
 The simulation code passes the following unit tests:
 \begin{enumerate}
-  \item Ramsey filter function matches the analytic formula~\eqref{eq:F_ramsey}
-        to $<1\%$ for $\omega \in [0.01/T,\;100/T]$.
-  \item GPS-$m$ sensitivity $|\partial_\delta S|_{\delta=0}|^2 = T^2/4$ for $m = 1,2,4,8$
-        (all equal to Ramsey), verified by finite difference to $<10^{-6}$.
-  \item GPS-$m$ filter function is nonzero at $\omega = \Omega$ (peaked, not nulled),
-        confirming the absence of exact nulls at the drive frequency.
-  \item Noiseless Bloch-sphere trajectory for all QSP sequences matches analytic
-        CK polynomial predictions to relative error $<10^{-10}$.
-  \item Kubo variance $\langle\delta M^2\rangle$ computed by direct time integration
-        matches $\int\mathcal{F}_e(\omega)S(\omega)\,d\omega/(2\pi)$ to $<0.1\%$
+  \item Ramsey filter function matches the analytic
+        formula~\eqref{eq:F_ramsey} to $<1\%$ for
+        $\omega\in[0.01/T,\;100/T]$.
+  \item GPS-$m$ sensitivity $|\partial_\delta S|_{\delta=0}|^2=T^2/4$ for
+        $m=1,2,4,8$ (all equal to Ramsey), verified by finite difference to
+        $<10^{-6}$.
+  \item GPS-$m$ filter function is nonzero at $\omega=\Omega$ (peaked, not
+        nulled), confirming the absence of exact nulls at the drive frequency.
+  \item Noiseless Bloch-sphere trajectory for all QSP sequences matches
+        analytic CK polynomial predictions to relative error $<10^{-10}$.
+  \item Kubo variance $\langle\delta M^2\rangle$ computed by direct time
+        integration matches
+        $\int\mathcal{F}_e(\omega)S(\omega)\,d\omega/(2\pi)$ to $<0.1\%$
         for white and $1/f$ noise PSDs.
 \end{enumerate}
-
-
 % ============================================================
 \section{Validity of Linear Response Theory}
 \label{sec:validity}
@@ -904,27 +1277,6 @@ Kubo formula; the leading second-order Magnus correction scales as
 $\epsilon^2\mathcal{F}^{(2)}(\omega)$ where $\mathcal{F}^{(2)}$ involves convolutions
 of $\phi(t)$, and is negligible for $\epsilon_{\rm rms} \ll 1$.
 
-\subsection{Dynamic range and fringe-hopping}
-\label{sec:fringe_hop}
-
-In the strongly noisy regime ($\epsilon_{\rm rms} \gtrsim 0.3$), GPS protocols are
-additionally susceptible to fringe-hopping.
-The GPS-$m$ error-signal fringe width is
-$\delta_{\rm lock}^{\rm GPS} \approx \pi/(2mT)$---a factor of $m$ narrower than
-Ramsey's $\delta_{\rm lock}^{\rm Ramsey} \approx \pi/(2T)$---so the servo locks to
-an adjacent fringe when $\sigma_\delta \gtrsim \delta_{\rm lock}^{\rm GPS}$.
-The per-cycle fringe-hopping probability is
-\be
-  P_{\rm hop} \approx \mathrm{erfc}\!\left(\frac{\delta_{\rm lock}}{\sqrt{2}\,\sigma_\delta}\right),
-  \label{eq:phop}
-\ee
-where $\sigma_\delta = [\int_0^T S_\beta(\omega)\,d\omega/(2\pi)]^{1/2}$.
-For GPS-$m=8$ under white noise at $\epsilon_{\rm rms} = 0.5$,
-$P_{\rm hop} \approx 10^{-3}$; the crossover occurs near $\epsilon_{\rm rms} \approx 1$,
-well outside the linear-response regime.
-Pulsed QSP sequences offer a practical advantage here: their wider fringes
-(closer to Ramsey) maintain servo lock under stronger noise.
-
 \subsection{Numerical verification}
 \label{sec:kubo_numerical}
 
@@ -974,7 +1326,7 @@ Sec.~\ref{sec:strong_noise} is required.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.48\textwidth]{figures/qubit_performance_plots/kubo_filter_comparison}
+  \includegraphics[width=0.48\textwidth]{kubo_filter_comparison.pdf}
   \caption{Ratio of exact (analytic or Monte Carlo) variance to the linear-response
     Kubo prediction as a function of $\epsilon_{\rm rms} = \sqrt{S_0 T}$, for white
     noise $S_\beta(\omega)=S_0$ and $T=2\pi$.
@@ -989,23 +1341,6 @@ Sec.~\ref{sec:strong_noise} is required.
   \label{fig:kubo_validity}
 \end{figure}
 
-
-% ============================================================
-\section{Protocol Performance Comparisons for Different Noise Spectra}
-\label{sec:new_protocols}
-% ============================================================
-
-Here we examine additional noise scenarios of practical relevance: the mixed (two-corner)
-noise model $S(\omega) = (1 + \omega_{c1}/|\omega|)\Theta(\omega_{c2}-|\omega|)$, which
-interpolates between $1/f$ below $\omega_{c1}$, white between $\omega_{c1}$ and $\omega_{c2}$,
-and zero above $\omega_{c2}$.  This models an LO with a $1/f$ corner at $\omega_{c1}$ and
-a bandwidth cutoff at $\omega_{c2}$.
-
-\placeholder{Add figure from plot\_mixed\_noise.py: FOM vs $\omega_{c2}$ for GPS $m=1,2,4,8,16$
-and equiangular $N=4$ at several $\omega_{c1}$ values.
-Key finding: GPS $m=8$ is optimal when $\omega_{c2} > 8$ and $\omega_{c1}=0$;
-equiangular N=4 beats any single GPS by 5--10\%.}
-
 % ============================================================
 \section{Pulse Shaping for Improved Noise Suppression}
 \label{sec:pulseshaping}
@@ -1018,11 +1353,62 @@ engineer $F_j^*(t)G_j(t)$ with a prescribed shape, achieving steeper roll-offs t
 piecewise-constant sequences.
 
 \subsection{Filter design via path-function engineering}
+\LZ{One comment I have to this section is that it would be useful to have a plot of sensitivity functions for GPS with different pulse shapes, and then also have another plot with the respective pulse shapes ($\Omega(t)$) for a fixed total interrogation time $t$. Generally, it could also be nice to put a table with the pulse envelope functions and expected asymptotic roll-offs for GPS (i.e. $f^{-\alpha}$)}
+
+Figure~\ref{fig:shaped_gps} shows the filter functions $\mathcal{F}_e(\omega)/T^2$
+for GPS ($m=1$) with three envelope choices---square (piecewise-constant),
+raised-cosine, and optimized gradient-descent---alongside the corresponding
+Rabi profiles $\Omega(t)$ for fixed total rotation $\Theta=2\pi$ and $T=2\pi$.
+Table~\ref{tab:rolloff} summarizes the asymptotic roll-off exponents.
+These illustrate the general principle: the roll-off of $\mathcal{F}_e(\omega)$
+is governed by the smoothness of the path function $F^*(t)G(t)$ at the pulse
+boundaries; each additional continuous derivative contributes two additional
+powers of $\omega^{-1}$ to the decay.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{shaped_gps_optimised.pdf}
+  \caption{%
+    Filter functions $\mathcal{F}_e(\omega)/T^2$ (top) and corresponding Rabi
+    envelopes $\Omega(t)$ (bottom) for GPS $m{=}1$ ($T=2\pi$) under three
+    pulse-shaping strategies.
+    Square (piecewise-constant) envelope: $\mathcal{F}_e\sim\omega^{-2}$.
+    Raised-cosine envelope ($\Omega(0)=\Omega(T)=0$, one continuous derivative):
+    $\mathcal{F}_e\sim\omega^{-6}$.
+    Optimized gradient-descent envelope achieves the steepest numerically
+    obtainable roll-off for the given duration $T$.
+    All envelopes complete the same total rotation $\Theta=2\pi$.%
+  }
+  \label{fig:shaped_gps}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Envelope & Boundary conditions & Roll-off ($\omega\to\infty$) \\
+\midrule
+Square (piecewise-constant) & $\Omega$ discontinuous & $\omega^{-2}$ \\
+Raised-cosine & $\Omega=0$, $\dot\Omega=0$ at ends & $\omega^{-6}$ \\
+$C^\infty$ (e.g.\ Gaussian-truncated) & all derivatives vanish & faster than any power \\
+\bottomrule
+\end{tabular}
+\caption{%
+  Asymptotic roll-off of $\mathcal{F}_e(\omega) = |\Phi(\omega)|^2$ for GPS $m=1$
+  under different probe-channel envelope smoothness classes.
+  Each additional continuous derivative at the boundary improves the decay
+  by two powers of $\omega$.
+  The clock-noise channel $|\mathcal{X}(\omega)|^2$ is governed by $|G(t)|^2$,
+  which has a jump at segment boundaries whenever $\Theta_j \neq 2\pi k$,
+  limiting $\mathcal{F}_e^{\rm clock}\sim\omega^{-2}$ regardless of pulse shaping.%
+}
+\label{tab:rolloff}
+\end{table}
 
 The key insight from Eq.~\eqref{eq:Fe} is that $\mathcal{F}_e(\omega) \propto |\Phi(\omega)|^2$
 where $\Phi(\omega)$ is essentially the Fourier transform of the path function $F^*(t)G(t)$
 along the Bloch sphere trajectory.
-By the Paley--Wiener theorem \cite{}, the Fourier transform of a compactly supported
+By the Paley--Wiener theorem \cite{Katznelson2004}, the Fourier transform of a compactly supported
 function in $[0,T]$ with $k$ continuous derivatives decays as $\omega^{-(k+1)}$ at
 large $\omega$.
 To achieve roll-off $\mathcal{F}_e \sim \omega^{-2(k+1)}$, we therefore require $k$
@@ -1032,18 +1418,92 @@ For standard equiangular pulses, $F^*(t)G(t)$ has jump discontinuities in its fi
 derivative at each pulse boundary ($k = 0$), giving $\mathcal{F}_e \sim \omega^{-2}$
 (instantaneous limit) or $\omega^{-4}$ (finite-duration limit).
 By using smoothly varying Rabi envelopes $\Omega(t)$ that join smoothly at boundaries,
-one can achieve $k = 1$ ($\omega^{-6}$ roll-off) or higher.
+one can achieve $k = 1$ ($\omega^{-6}$ roll-off) or higher \LZ{Is there a limit to this?}.
+In principle, there is no algebraic limit: a $C^\infty$ envelope (e.g.\ a
+Gaussian truncated to $[0,\tau]$ with all derivatives set to zero at both ends)
+gives super-polynomial decay, $|\Phi(\omega)| = O(\omega^{-N})$ for any $N$.
+The practical constraints are bandwidth (the peak Rabi frequency $\Omega_{\rm peak}$
+must remain experimentally achievable given the fixed total rotation $\Theta_j$
+and duration $\tau_j$) and the clock-noise channel: since $|G(t)|^2$ has a jump
+whenever $\Theta_j \neq 2\pi k$, the clock-noise roll-off remains
+$\omega^{-2}$ regardless of how smooth $\Omega(t)$ is (Table~\ref{tab:rolloff}).
 
 \subsection{Smooth Rabi envelope sequences}
+\label{sec:smooth_envelope}
 
-\placeholder{Derive the resulting $\Phi(\omega)$ analytically for the raised-cosine
-envelope and show the $\omega^{-6}$ asymptotic decay.}
+The recurrences~\eqref{eq:recurrence_F}--\eqref{eq:recurrence_G} hold for
+\emph{general} pulse shapes with the replacement
+\be
+  \theta_j(t) \;\longrightarrow\; h_j(t) \;\equiv\; \int_{t_{j-1}}^{t} \Omega_j(t')\,dt'\,,
+  \label{eq:cumarea}
+\ee
+where $h_j(t)$ is the cumulative pulse area, $\dot{h}_j(t) = \Omega_j(t)$, and
+$h_j(t_{j-1})=0$, $h_j(t_j)=\Theta_j$ (total rotation angle of segment $j$).
+For a square (piecewise-constant) envelope this recovers $h_j(t)=\Omega_j(t-t_{j-1})$;
+for a shaped envelope $h_j(t)$ is a nonlinear function of time.
 
-\placeholder{Figure: Pulse-shaping comparison. Left: Rabi envelopes $\Omega(t)$
-for square pulse (standard GPS) and raised-cosine envelope.
-Right: resulting filter functions $|\Phi(\omega)|^2$ on log-log scale, showing
-$\omega^{-4}$ (square) vs $\omega^{-6}$ (raised cosine) roll-offs.
-Include a reference $1/f^2$ noise spectrum.}
+Expanding $F_j^*(t)G_j(t)$ using the recurrences yields (see Supplemental Material, Sec.~SVII):
+\bea
+  F_j^*(t)G_j(t) &= \cos h_j(t)\,\varphi_{j-1}
+    + \tfrac{1}{2}\!\left[e^{-i\phi_j}(f_{j-1}^*)^2 - e^{i\phi_j}g_{j-1}^2\right]\sin h_j(t)\,,
+  \label{eq:FstarG_shaped}
+\end{align}
+where $\varphi_{j-1}=f_{j-1}^*g_{j-1}$ is the path-function value entering segment $j$.
+The contribution of segment $j$ to $\Phi(\omega)=\int_0^T F^*G\,e^{-i\omega t}\,dt$ is then
+\be
+  \Phi_j(\omega) = e^{-i\omega t_{j-1}}\!\left[
+    \varphi_{j-1}\,\tilde{I}_c^{(j)}(\omega)
+    + \frac{e^{-i\phi_j}(f_{j-1}^*)^2 - e^{i\phi_j}g_{j-1}^2}{2}\,\tilde{I}_s^{(j)}(\omega)
+  \right],
+  \label{eq:Phi_j_shaped}
+\ee
+where
+\be
+  \tilde{I}_c^{(j)}(\omega) = \int_0^{\tau_j}\!\cos h_j(s)\,e^{-i\omega s}\,ds\,,\quad
+  \tilde{I}_s^{(j)}(\omega) = \int_0^{\tau_j}\!\sin h_j(s)\,e^{-i\omega s}\,ds\,,
+  \label{eq:Ic_Is}
+\ee
+and $\Phi(\omega)=\sum_j\Phi_j(\omega)$.  These integrals reduce to the standard sinc-like
+terms when $h_j(s)=\Omega_j s$ (square envelope).
+
+\paragraph{Raised-cosine envelope.}
+The raised-cosine envelope with total rotation $\Theta_j$ over duration $\tau_j$ is
+\be
+  \Omega_j(t) = \frac{\Theta_j}{\tau_j}\!\left[1-\cos\!\frac{2\pi(t-t_{j-1})}{\tau_j}\right],
+  \label{eq:RC_envelope}
+\ee
+giving cumulative area $h_j(s) = (\Theta_j/\tau_j)s - (\Theta_j/2\pi)\sin(2\pi s/\tau_j)$.
+Since $\Omega_j(0)=\Omega_j(\tau_j)=0$ and $\dot\Omega_j(0)=\dot\Omega_j(\tau_j)=0$,
+applying the Jacobi--Anger expansion
+$e^{iz\sin\psi}=\sum_n J_n(z)e^{in\psi}$ to $e^{ih_j(s)} = e^{i(\Theta_j/\tau_j)s}\cdot e^{-i(\Theta_j/2\pi)\sin(2\pi s/\tau_j)}$
+yields exact closed-form expressions for $\tilde{I}_{c,s}^{(j)}$ as sums of sinc functions
+(see Supplemental Material, Sec.~SVII):
+\be
+  \tilde{I}_c^{(j)}(\omega) + i\,\tilde{I}_s^{(j)}(\omega)
+  = \tau_j\sum_{n=-\infty}^{\infty} J_n\!\!\left(\frac{\Theta_j}{2\pi}\right)
+    \frac{\sin\xi_n^{(j)}}{\xi_n^{(j)}}\,e^{i\xi_n^{(j)}}\,,
+  \label{eq:JA_result}
+\ee
+where $\xi_n^{(j)}=\bigl[(\Theta_j/2\pi - n)\,2\pi/\tau_j - \omega\bigr]\tau_j/2$.
+
+\paragraph{Probe vs.\ clock channel roll-off.}
+Because $\Omega_j(0)=\Omega_j(\tau_j)=0$, the function $\sin h_j(s)$ and its first two
+derivatives all vanish at the segment boundaries.
+Three successive integrations by parts on $\tilde{I}_s^{(j)}$ then give
+$|\tilde{I}_s(\omega)|\leq C/\omega^3$, so
+\be
+  \mathcal{F}_e^{\rm probe}(\omega) = \tfrac{1}{2}|\Phi(\omega)|^2 \;\sim\; \omega^{-6}
+  \qquad (\omega\to\infty)\,.
+  \label{eq:rolloff_RC}
+\ee
+The clock-noise channel, however, is governed by $|\mathcal{X}(\omega)|^2$ where
+$|G(t)|^2 = \sin^2(h_j(t)/2)$.
+This function has $|G(t_{j-1}^+)|^2=0$ and $|G(t_j^-)|^2=\sin^2(\Theta_j/2)$ in general
+nonzero: the jump at each segment boundary limits $|\mathcal{X}(\omega)|\sim\omega^{-1}$
+and thus $\mathcal{F}_e^{\rm clock}\sim\omega^{-2}$, regardless of pulse shaping.
+Shaped envelopes therefore selectively suppress probe-noise sensitivity at high frequencies,
+while clock-noise immunity requires a different strategy (e.g., arranging $\Theta_j=2\pi k$
+so $|G|^2$ is continuous at boundaries).
 
 \subsection{Optimization via gradient descent}
 
@@ -1070,43 +1530,33 @@ return to direct time-domain simulation to assess clock performance.
 In this regime the concept of a single filter function is no longer meaningful;
 instead, clock performance is characterized by the Allan variance computed from
 many realizations of the noisy clock cycle.
+Direct simulations incorporating the full clock servo are reserved for future work;
+here we analyze one practically important nonlinear effect---fringe-hopping---that
+can be treated analytically and that directly limits GPS performance at moderate noise.
 
-\subsection{Clock cycle model}
-\label{sec:clock_model}
+\subsection{Dynamic range and fringe-hopping}
+\label{sec:fringe_hop}
 
-We model the full clock operation as follows.
-At each cycle $k$ of duration $T$, the local oscillator has accumulated a phase error
-$\phi_k = \int_{(k-1)T}^{kT} \delta_{\rm LO}(t)\,dt$ where $\delta_{\rm LO}(t)$ is the
-LO frequency noise.
-The atom experiences a detuning $\delta_k = \bar\delta + \delta_{\rm noise}^{(k)}$
-where $\bar\delta$ is the slowly varying frequency offset (what the clock is locking to)
-and $\delta_{\rm noise}^{(k)}$ is the fast noise accumulated during cycle $k$.
-
-The clock servo updates the LO frequency based on the measured atomic signal $m_k$:
+In the strongly noisy regime ($\epsilon_{\rm rms} \gtrsim 0.3$), GPS protocols are
+additionally susceptible to fringe-hopping.
+Under the correct detuning Hamiltonian $H_\delta = \delta|e\rangle\langle e|$,
+the GPS-$m$ error signal at $\delta=0$ takes the form
+$S(\delta) \approx (-1)^m\sin(\delta T/2)$
+(derived in Supplemental Material, Sec.~SI).
+The fringe half-width is therefore
+$\delta_{\rm lock}^{\rm GPS} \approx \pi/T$---identical to Ramsey's
+$\delta_{\rm lock}^{\rm Ramsey} \approx \pi/T$---so GPS and Ramsey have
+the same dynamic range against fringe-hopping.
+The servo locks to an adjacent fringe when $\sigma_\delta \gtrsim \pi/T$.
+The per-cycle fringe-hopping probability is
 \be
-  \bar\delta_{k+1} = \bar\delta_k - g\,\frac{m_k}{\mathcal{S}}\,,
-  \label{eq:servo}
+  P_{\rm hop} \approx \mathrm{erfc}\!\left(\frac{\pi/T}{\sqrt{2}\,\sigma_\delta}\right),
+  \label{eq:phop}
 \ee
-where $g$ is the servo gain.
-The Allan variance is computed from the time record of $\bar\delta_k$ in the
-standard way \cite{}.
-
-\placeholder{Figure: Allan deviation $\sigma_y(\tau)$ for (a) two-level Ramsey,
-(b) GPS-$m=4$, (c) GPS-$m=8$, (d) optimized pulsed QSP $n=5$,
-for a $1/f^2$ noise model with $\beta_{\rm rms}$ in the nonlinear regime.
-Show improvement in both short-$\tau$ (noise floor) and long-$\tau$ (drift) behavior.
-Overlay the linear-response prediction (dashed) to show where it fails.}
-
-\placeholder{Figure: Lock-in bandwidth (capture range) vs noise amplitude for
-Ramsey vs QSP sequences, demonstrating improved dynamic range of QSP protocols.}
-
-\subsection{Discussion: when does the GPS advantage persist?}
-
-In the strongly noisy regime, the GPS advantage in DC sensitivity can be partially offset
-by fringe-hopping---the servo locking to a neighboring fringe of the narrower GPS error signal.
-\placeholder{Add analysis of fringe-hopping probability as a function of $\beta_{\rm rms}/\mathcal{S}$
-for GPS-$m$ and Ramsey. Identify the crossover noise level above which GPS becomes
-disadvantageous.}
+where $\sigma_\delta = [\int_0^T S_\beta(\omega)\,d\omega/(2\pi)]^{1/2}$.
+For GPS-$m=8$ under white noise at $\epsilon_{\rm rms} = 0.5$,
+$P_{\rm hop} \approx 10^{-3}$; the crossover occurs near $\epsilon_{\rm rms} \approx 1$,
+well outside the linear-response regime.
 
 
 % ============================================================
@@ -1117,7 +1567,7 @@ disadvantageous.}
 We have introduced the temporal QSP formalism as a unified framework for understanding
 and optimizing atomic clock performance under realistic noise environments.
 The framework makes quantitative the connection between the algebraic structure of
-pulse sequences---encoded in the Cayley--Klein amplitudes $F(t),G(t)$---and the two key
+pulse sequences---encoded in the amplitudes $F(t),G(t)$---and the two key
 clock performance metrics: the per-shot frequency sensitivity $\mathcal{S}^2$ and the
 Kubo noise filter function $\mathcal{F}_e(\omega)$.
 
@@ -1126,357 +1576,32 @@ integer-cycle protocols at $\delta=0$ share the same DC sensitivity as Ramsey
 ($|\mathcal{S}|^2 = T^2/4$), so protocol comparisons reduce entirely to filter-function
 differences.
 The filter function has two contributions---from the coherence path $F^*G$ and the
-population path $|G|^2$---and contrary to prior expectation, GPS filter functions are
-\emph{peaked} (not nulled) at the Rabi frequency.
+population path $|G|^2$.
 
 The numerical comparison of Table~\ref{tab:fom} establishes a quantitative hierarchy:
-no single protocol is universally optimal, but pulsed QSP sequences achieve $3$--$7\times$
-FOM improvement over all continuous-drive protocols for white and $1/f$ noise by
-rediscovering CPMG-like spin-echo structures.
-GPS $m=1$, by contrast, is nearly optimal for high-pass noise environments where its
-filter function is concentrated below the noise cutoff.
+no single protocol is universally optimal.
+Pulsed QSP sequences universally converge to a double-$\pi$ structure, achieving
+$\mathcal{F}_e(0)\approx T^2$---the same DC sensitivity as optimal two-level Ramsey
+spectroscopy---a factor of $4\times$ above all continuous-drive three-level protocols.
+Among the latter, equiangular sequences with $N=8,16$ achieve the best
+$\sigma^2_\nu$ for white and $1/f$ noise ($\approx1.3\times$ better than Ramsey).
+GPS $m=1$ is nearly optimal for high-pass noise environments where its filter function
+is concentrated below the noise cutoff, with $\sigma^2_\nu\approx 60\times$ below Ramsey.
 
 Looking forward, the temporal QSP framework opens several directions:
 the extension to multi-axis noise (simultaneous dephasing and amplitude noise),
-gradient-based optimization of smooth pulse envelopes for steeper filter roll-off,
-and the application to other quantum sensing platforms such as NV centers in diamond
-and trapped-ion quantum sensors.
-\placeholder{Add 2--3 sentences on most exciting near-term directions based on
-group priorities.}
-
+and the application to other multi-level quantum sensing applications.
+The pulse-shaping analysis of Sec.~\ref{sec:pulseshaping} shows that smooth
+Rabi envelopes satisfying $\Omega(0)=\Omega(\tau)=0$ achieve $\mathcal{F}_e\sim\omega^{-6}$
+roll-off in the probe-noise channel, compared to $\omega^{-4}$ for piecewise-constant
+drives; systematic gradient-based optimization of such envelopes is a
+near-term extension of the present work.
 
 % ============================================================
 \begin{acknowledgments}
 \placeholder{Acknowledgments.}
 \end{acknowledgments}
 
-% ============================================================
-\appendix
-
-\section{Kubo Linear Response: Full Derivation}
-\label{app:kubo}
-
-This appendix derives the filter function formula~\eqref{eq:Fe} from first principles,
-treating both the two-level qubit baseline and the three-level $\Lambda$ clock.
-
-\subsection*{A1. Two-level qubit baseline}
-
-For a single-qubit sensor with states $\{|g\rangle, |e\rangle\}$ and QSP control
-propagator $U_{\rm QSP}(t)$ as in~\eqref{eq:u_qsp_poly}, the symmetric noise
-Hamiltonian $H_\epsilon = \beta(t)\sigma_z^{ge}/2$ becomes in the toggling frame:
-\begin{align}
-  \tilde{H}(t) = U_{\rm QSP}^\dagger H_\epsilon U_{\rm QSP}
-  = \frac{\beta(t)}{2}\begin{pmatrix}
-      |F|^2-|G|^2 & -2iF^*G^* \\
-      2iFG        & |G|^2-|F|^2
-    \end{pmatrix}\,.
-\end{align}
-For initial state $|\psi_0\rangle = (|g\rangle+|e\rangle)/\sqrt{2}$ and
-observable $M = \sigma_y^{ge}$, the Kubo formula gives
-\be
-  \langle\delta M^2\rangle = \int \frac{d\omega}{2\pi}\, S_\beta(\omega)\,
-  \mathcal{F}^{(2L)}(\omega)\,,\quad
-  \mathcal{F}^{(2L)}(\omega) = |\Phi(\omega)|^2\,,
-\ee
-where $\Phi(\omega) = \int_0^T F^*(t)G(t)\,e^{-i\omega t}\,dt$.
-This is the standard dynamical-decoupling filter function \cite{Cywinski2008,Biercuk2009}.
-
-\subsection*{A2. Three-level $\Lambda$ clock: two noise channels}
-
-For the three-level Lambda system we have two independent noise channels:
-\begin{itemize}
-  \item \emph{Probe noise}: $H_e = \beta_e(t)|e\rangle\langle e|$ with PSD $S_e(\omega)$.
-  \item \emph{Clock noise}: $H_m = \beta_m(t)|m\rangle\langle m|$ with PSD $S_m(\omega)$.
-\end{itemize}
-The QSP drive acts only on the $\{g,e\}$ probe subspace, leaving $|m\rangle$ unperturbed.
-In the three-level toggling frame, the probe and clock noise operators become
-\begin{align}
-  \tilde{A}_e(t) &= |G|^2|g\rangle\langle g| + |F|^2|e\rangle\langle e|
-     - iF^*G|g\rangle\langle e| + iFG^*|e\rangle\langle g|\,, \\
-  \tilde{A}_m &= |m\rangle\langle m|\,.
-\end{align}
-
-\subsection*{A3. First-order signal response}
-
-With $|\Psi\rangle = (|g\rangle + |m\rangle)/\sqrt{2}$ and
-$M = \sigma_y^{gm} = -i|g\rangle\langle m| + i|m\rangle\langle g|$,
-the commutator with the toggled probe noise evaluates to
-\be
-  \langle\Psi|[M, \tilde{A}_e(t)]|\Psi\rangle = \mathrm{Im}\bigl[F^*(t)G(t)\bigr]\,.
-\ee
-The $\tilde{A}_m$ contribution vanishes at first order for the equal-superposition state.
-The first-order signal shift is $\langle\delta M\rangle = \int_0^T \beta_e(t)\,\mathrm{Im}[\phi(t)]\,dt$
-where $\phi(t) \equiv F^*(t)G(t)$; this vanishes at $\delta=0$ as required.
-
-\subsection*{A4. Second-order variance: probe noise}
-
-Applying the Wiener--Khinchin theorem to the two-time noise correlator
-$\langle\beta_e(t)\beta_e(t')\rangle = \int\frac{d\omega}{2\pi}\,S_e(\omega)\,e^{-i\omega(t-t')}$:
-\be
-  \langle\delta M^2\rangle_e = \int\frac{d\omega}{2\pi}\,S_e(\omega)
-    \int_0^T\!\!\int_0^T\!\! dt\,dt'\,K_e(t,t')\,e^{-i\omega(t-t')}\,,
-\ee
-with $K_e(t,t') = \tfrac{1}{2}\,\mathrm{Re}[\phi(t)\,\phi^*(t')]$.
-The factor $\tfrac{1}{2}$ (relative to the two-level formula) arises because the
-probe Hamiltonian $\beta_e|e\rangle\langle e|$ shifts only one level, contributing
-half the differential phase compared to the symmetric form $\beta\sigma_z/2$.
-After Wiener--Khinchin the double integral factors:
-\be
-  \langle\delta M^2\rangle_e = \int\frac{d\omega}{2\pi}\,S_e(\omega)\cdot\tfrac{1}{2}|\Phi(\omega)|^2\,.
-\ee
-
-\subsection*{A5. Second-order variance: clock noise}
-
-Clock noise $\beta_m(t)|m\rangle\langle m|$ phases the $|m\rangle$ component of the state
-while leaving the probe subspace evolution unchanged.
-After the QSP sequence the $|g\rangle$ amplitude at measurement is $F(T)/\sqrt{2}$;
-the $|m\rangle$ amplitude acquires a stochastic phase $e^{-i\int_0^T\!\beta_m\,dt}/\sqrt{2}$.
-The resulting variance contribution is:
-\be
-  \langle\delta M^2\rangle_m = \int\frac{d\omega}{2\pi}\,S_m(\omega)\cdot|\mathcal{X}(\omega)|^2\,,
-\ee
-where $\mathcal{X}(\omega) = \int_0^T |G(t)|^2\,e^{-i\omega t}\,dt$.
-
-\subsection*{A6. Combined three-level filter function}
-
-Summing probe and clock noise contributions with $S_e = S_m \equiv S_\beta$:
-\be
-  \langle\delta M^2\rangle = \int\frac{d\omega}{2\pi}\,S_\beta(\omega)\,\mathcal{F}_e(\omega)\,,
-\ee
-\be
-  \mathcal{F}_e(\omega) = \tfrac{1}{2}|\Phi(\omega)|^2 + |\mathcal{X}(\omega)|^2\,,
-\ee
-recovering Eqs.~\eqref{eq:Fe}--\eqref{eq:Chi}.
-The $\tfrac{1}{2}$ prefactor distinguishes the three-level result from the two-level
-case: it reflects the asymmetric probe Hamiltonian $\delta|e\rangle\langle e|$ rather
-than the symmetric form $\delta\sigma_z/2$.
-The $|\mathcal{X}|^2$ term has no two-level analog; it captures the sensitivity of
-the $\{g,m\}$ measurement to clock-transition fluctuations mediated by the
-time-varying probe excited-state population $|G(t)|^2$.
-
-\section{Two-Level Reduction}
-\label{app:two_level_reduction}
-
-Setting $|m\rangle \equiv |e\rangle$, $\beta_m \equiv \beta_e$, and taking
-$M = \sigma_z^{ge}$ (so $m_z=1$, $m_x=m_y=0$) gives the standard qubit filter function:
-\be
-  \mathcal{F}^{(2L)}(\omega) = |\Phi(\omega)|^2\,,
-\ee
-where $\Phi(\omega) = \int_0^T F^*(t)G(t)\,e^{-i\omega t}\,dt$.
-For a Ramsey interval ($\pi/2$--$\tau$--$\pi/2$ in the instantaneous limit),
-$F^*(t)G(t) = (i/2)\sin(\omega_0\tau)\Theta(\tau<t<T-\tau)$ reduces to the standard result
-$\mathcal{F}^{(2L)}_{\rm Ramsey}(\omega) = 4\sin^2(\omega T/2)/\omega^2$.
-
-\section{Filter Functions for Standard Sequences}
-\label{app:filter_functions}
-
-\subsection*{C1. Ramsey sequence}
-
-For two instantaneous $\pi/2$ pulses:
-\be
-  \mathcal{F}_{\rm Ramsey}(\omega) = \frac{4\sin^2(\omega T/2)}{\omega^2}\,.
-\ee
-
-\subsection*{C2. CPMG sequence ($n$ pulses, spacing $\tau$)}
-
-Instantaneous pulses:
-\be
-  \mathcal{F}_{\rm CPMG}(\omega) = \frac{4}{\omega^2}
-    \tan^2\!\left(\frac{\omega\tau}{2}\right)\sin^2\!\left(\frac{\omega n\tau}{2}\right)\,.
-\ee
-
-\subsection*{C3. GPS $m$-cycle sequence}
-
-For $m$ identical equiangular cycles of total duration $T = m\tau_R$:
-\be
-  \Phi_{\rm GPS}(\omega) = \frac{1-e^{im\omega\tau_R}}{1-e^{i\omega\tau_R}}\,\Phi_{\rm cyc}(\omega)\,,
-\ee
-showing that the GPS filter function is a product of the single-cycle function
-$|\Phi_{\rm cyc}(\omega)|^2$ and a standard multi-pulse interference factor.
-
-\subsection*{C4. Roll-off behavior and pulse smoothness}
-
-The high-frequency decay of $\mathcal{F}_e(\omega)$ is controlled by the regularity
-of the path functions $\phi(t) = F^*(t)G(t)$ and $\chi(t) = |G(t)|^2$ at pulse
-boundaries.
-By repeated integration by parts, $k$ continuous derivatives of $\phi(t)$ give
-$|\hat\Phi(\omega)| \leq C/|\omega|^{k+1}$ and $\mathcal{F}_e \sim \omega^{-2(k+1)}$
-at large $\omega$:
-\begin{center}
-\begin{tabular}{lll}
-\hline
-Pulse type & Regularity $k$ & $\mathcal{F}_e$ roll-off \\
-\hline
-Instantaneous ($\tau_p \to 0$) & $-1$ & $\omega^{-2}$ \\
-Square (piecewise constant)    & $0$  & $\omega^{-4}$ \\
-Raised-cosine envelope         & $1$  & $\omega^{-6}$ \\
-Gaussian-like                  & $\infty$ & faster than any power law \\
-\hline
-\end{tabular}
-\end{center}
-For standard equiangular sequences, $\phi(t)$ has discontinuous first derivatives at
-pulse boundaries ($k=0$), giving the $\omega^{-4}$ roll-off observed numerically.
-Smooth Rabi envelopes satisfying $\Omega(0)=\Omega(\tau)=0$ achieve $k\geq 1$ and
-steeper roll-offs; see Sec.~\ref{sec:pulseshaping} and the raised-cosine construction
-of Sec.~\ref{sec:pulseshaping}.
-
-\section{Temporal QSP Polynomial Recurrences}
-\label{app:recurrences}
-
-During the $j$-th segment ($t_{j-1} < t \leq t_j$, Rabi frequency $\Omega_j$,
-phase $\phi_j$, duration $\tau_j$):
-\begin{align}
-  F_j(t) &= \cos\tfrac{\theta_j(t)}{2}\,f_{j-1} - e^{-i\phi_j}\sin\tfrac{\theta_j(t)}{2}\,g_{j-1}^*\,, \\
-  G_j(t) &= \cos\tfrac{\theta_j(t)}{2}\,g_{j-1} + e^{-i\phi_j}\sin\tfrac{\theta_j(t)}{2}\,f_{j-1}^*\,,
-\end{align}
-with $\theta_j(t) = \Omega_j(t-t_{j-1})$, $f_0 = 1$, $g_0 = 0$.
-
-\section{GPS Sensitivity and Signal Formula}
-\label{app:gps_sensitivity}
-
-\subsection*{E1. Three-level propagator}
-
-The Lambda system has levels $|g\rangle$, $|e\rangle$, $|m\rangle$ with probe
-drive $H_{\rm drive} = \tfrac{\Omega}{2}(|g\rangle\langle e|+|e\rangle\langle g|)$
-and detuning Hamiltonian $H_\delta = \delta|e\rangle\langle e|$.
-The form $H_\delta = \delta|e\rangle\langle e|$ is \emph{not} traceless in the
-$\{g,e\}$ probe subspace; it generates a global probe phase $e^{-i\delta\tau/2}$
-relative to $|m\rangle$ over each segment of duration $\tau$.
-For a single continuous drive of duration $T$ at detuning $\delta$, the full
-three-level propagator is
-\be
-  U(\delta, T) = e^{-i\delta T/2}
-  \begin{pmatrix}
-    f(\delta,T) & ig(\delta,T) & 0 \\
-    ig^*(\delta,T) & f^*(\delta,T) & 0 \\
-    0 & 0 & e^{i\delta T/2}
-  \end{pmatrix},
-  \label{eq:3level_prop_app}
-\ee
-where $f$, $g$ are the Cayley--Klein amplitudes for the SU(2) rotation in the probe
-subspace under the traceless part of $H_\delta + H_{\rm drive}$:
-\begin{align}
-  f(\delta,T) &= \cos\!\left(\frac{\Omega_R T}{2}\right)
-    + i\frac{\delta}{\Omega_R}\sin\!\left(\frac{\Omega_R T}{2}\right), \\
-  g(\delta,T) &= -i\frac{\Omega}{\Omega_R}\sin\!\left(\frac{\Omega_R T}{2}\right),
-\end{align}
-with $\Omega_R = \sqrt{\Omega^2 + \delta^2}$.
-
-\subsection*{E2. GPS clock signal}
-
-The initial clock state is $|\psi_0\rangle = (|g\rangle+|m\rangle)/\sqrt{2}$ and
-the measurement operator is $M = \sigma_y^{gm} = -i|g\rangle\langle m|+i|m\rangle\langle g|$.
-After the GPS drive, $|g\rangle$ evolves to $U|g\rangle$ while $|m\rangle$ is
-unaffected (the lower-right block of~\eqref{eq:3level_prop_app} contributes only a phase).
-The clock signal is:
-\begin{align}
-  S(\delta)
-  &= \langle\psi_0|U^\dagger M\,U|\psi_0\rangle
-   = \mathrm{Im}\!\left[e^{i\delta T/2}f^*(\delta,T)\right].
-\end{align}
-Substituting the explicit form of $f$ gives Eq.~\eqref{eq:gps_signal} of the main text:
-\be
-  S(\delta) = \sin\!\left(\frac{\delta T}{2}\right)\cos\!\left(\frac{\Omega_R T}{2}\right)
-            - \frac{\delta}{\Omega_R}\cos\!\left(\frac{\delta T}{2}\right)
-              \sin\!\left(\frac{\Omega_R T}{2}\right).
-  \label{eq:gps_signal_app}
-\ee
-The alternative probe-subspace-traceless formula $S = (\delta/\Omega_R)\sin(\Omega_R T/2)$
-omits the global probe phase and gives incorrect signal predictions away from $\delta = 0$.
-
-\subsection*{E3. DC sensitivity: all GPS-$m$ match Ramsey}
-
-Differentiating Eq.~\eqref{eq:gps_signal_app} with respect to $\delta$ and
-evaluating at $\delta=0$ (where $\Omega_R\to\Omega$, $\partial_\delta\Omega_R\to 0$):
-\begin{align}
-  \partial_\delta S\big|_{\delta=0}
-  &= \frac{T}{2}\cos\!\left(\frac{\Omega T}{2}\right)
-   - \frac{\sin(\Omega T/2)}{\Omega}\,.
-\end{align}
-For GPS-$m$ with $\Omega T = 2\pi m$: $\sin(m\pi) = 0$ and $\cos(m\pi) = (-1)^m$, so
-\be
-  \partial_\delta S\big|_{\delta=0}^{\rm GPS\text{-}m} = \frac{(-1)^m T}{2}\,,
-  \qquad
-  \left|\partial_\delta S\big|_{\delta=0}\right|^2 = \frac{T^2}{4}\quad\forall\,m\,.
-\ee
-This is Eq.~\eqref{eq:gps_sens_result}.
-The squared DC sensitivity $T^2/4 = \pi^2$ (for $T=2\pi$) is the same for all $m$ and
-equals the Ramsey sensitivity; all FOM differences between GPS protocols arise from
-$\mathcal{F}_e(\omega)$, not $\mathcal{S}^2$.
-Finite-difference verification ($\Delta\delta=10^{-5}$) agrees with this analytic
-result to $<0.1\%$ for $m = 1, 2, 4, 8$.
-
-\subsection*{E4. GPS filter function structure}
-
-At $\delta=0$, the GPS-$m$ CK amplitudes evolve as $F(t) = \cos(\Omega t/2)$,
-$G(t) = -i\sin(\Omega t/2)$, giving path functions
-\be
-  \phi(t) = F^*(t)G(t) = \tfrac{i}{2}\sin(\Omega t)\,,\qquad
-  |G(t)|^2 = \tfrac{1}{2}[1-\cos(\Omega t)]\,.
-\ee
-The Fourier transforms are peaked near $\omega = \Omega$ and $2\Omega$, so
-$\mathcal{F}_e(\omega) = \tfrac{1}{2}|\Phi|^2 + |\mathcal{X}|^2$ is
-\emph{peaked} at the drive frequency---not nulled there.
-This corrects the prediction from the probe-subspace-traceless Hamiltonian,
-which spuriously generates nulls at Rabi harmonics.
-Protocols with $\Omega < \omega_c$ are effectively transparent to band-limited
-high-pass noise, explaining the large FOM of GPS-$m=1$ under high-pass noise.
-
-\section{Pulse Sequence Optimization}
-\label{app:optimization}
-
-\subsection*{F1. Optimization objective}
-
-All protocols are optimized with respect to the FOM~\eqref{eq:fom}.
-Since the DC sensitivity $|\partial_\delta\langle M\rangle|_{\delta=0}^2$ is fixed
-at $T^2/4$ for all protocols at $\delta=0$ (Eq.~\eqref{eq:gps_sens_result}),
-maximizing FOM is equivalent to minimizing the Kubo denominator
-$\mathcal{C}(\boldsymbol{\lambda}) = \int_0^\infty \mathcal{F}_e(\omega;\boldsymbol{\lambda})\,S(\omega)\,d\omega/(2\pi)$,
-evaluated via FFT (Sec.~\ref{sec:numerics}).
-
-\subsection*{F2. Equiangular $N$-segment optimization}
-
-The free parameters are $(\Omega, \phi_2,\ldots,\phi_N)$, with
-$\Omega\in(0, \Omega_{\rm max}]$ and $\phi_k\in[0,2\pi)$.
-The optimization proceeds in two stages:
-\begin{enumerate}
-  \item \emph{Global search}: Differential Evolution (DE) with population size 20,
-        maximum 500 generations, ``best/1/bin'' mutation, crossover probability 0.7,
-        over $\Omega\in[\pi/(10T), N\pi/T]$ and $\phi_k\in[0,2\pi)$.
-        Twelve random-seed restarts guard against local minima.
-  \item \emph{Local polishing}: L-BFGS-B from the best DE solution,
-        gradient by central finite differences ($\epsilon=10^{-5}$),
-        convergence at $\Delta\mathcal{C}<10^{-9}$, $|\nabla\mathcal{C}|<10^{-7}$.
-\end{enumerate}
-For white noise ($N=4$), the optimal parameters are
-$\Omega^* T \approx 7.6$\,rad, $\boldsymbol{\phi}^*\approx[0,1.44,0.38,1.11]$\,rad.
-
-\subsection*{F3. Pulsed QSP optimization}
-
-The free parameters are $(\theta_1,\ldots,\theta_n, \phi_2,\ldots,\phi_n)$
-($2n-1$ total; $\phi_1=0$ by gauge), with $\theta_j\in[0.01\pi,\pi]$ and
-$\phi_j\in[0,2\pi)$.
-The upper bound $\theta_j\leq\pi$ restricts each pulse to at most a half Rabi cycle.
-The free-evolution gap is determined by $\tau_{\rm free} = (T-\sum_j\theta_j/\Omega_{\rm fast})/(n-1)$;
-feasibility ($\tau_{\rm free}>0$) is always satisfied for $\Omega_{\rm fast}T = 40\pi^2$.
-
-The same two-stage DE\,+\,L-BFGS-B procedure is used, with budgets scaled by $2n-1$:
-\begin{center}
-\begin{tabular}{cccc}
-\toprule
-$n$ & Free params & DE pop & DE maxiter \\
-\midrule
-3  & 5  & 10 & 150 \\
-5  & 9  & 10 & 120 \\
-9  & 17 & 8  & 80  \\
-\bottomrule
-\end{tabular}
-\end{center}
-Multiple restarts (4 for $n=3$, 3 for $n=5$, 2 for $n=9$) are performed and
-the best result is refined by L-BFGS-B.
-
-All filter functions in the objective use $N_{\rm FFT}=1024$, zero-padding $\times 2$;
-final FOMs in Table~\ref{tab:fom} are recomputed at $N_{\rm FFT}=4096$, zero-padding $\times 4$.
 
 \bibliography{ref}
 \end{document}

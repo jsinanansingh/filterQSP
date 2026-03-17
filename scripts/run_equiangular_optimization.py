@@ -33,8 +33,8 @@ T          = 2 * np.pi
 OMEGA_CUTOFF = 2 * np.pi / T
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 CACHE_PREFIX = 'equiangular_opt_cache'
-OBJECTIVE_MODE = 'normalized_difference'
-OBJECTIVE_WEIGHT = 1.0
+OBJECTIVE_MODE = 'ramsey_normalized'
+OBJECTIVE_WEIGHT = 1.0  # unused for inv_sens_plus_noise
 
 # ── Noise models ──────────────────────────────────────────────────────────────
 NOISE_SPECS = [

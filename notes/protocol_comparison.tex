@@ -6,6 +6,9 @@
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{physics}
 
+\newcommand{\chivar}{\chi}       % noise variance: \chivar_B(\delta)
+\newcommand{\dopt}{\delta_{\rm opt}}
+
 %% figure path relative to this file
 \graphicspath{{../figures/qubit_performance_plots/}}
 
@@ -17,43 +20,151 @@
 \begin{document}
 \maketitle
 
-\section*{Setup}
+%% ─────────────────────────────────────────────────────────────────────────────
+\section*{Framework}
+%% ─────────────────────────────────────────────────────────────────────────────
 
-We compare four sensing protocols for a three-level Lambda clock system with
-levels $\lvert g\rangle$ (ground), $\lvert e\rangle$ (probe-excited), and
-$\lvert m\rangle$ (metastable clock state).
-The QSP pulse sequence acts on the $\{g, e\}$ probe transition, while
-the signal is read out on the $\{g, m\}$ clock transition.
+\subsection*{General qubit sensor}
 
-\paragraph{State and observable.}
-The initial state is $\lvert\psi_0\rangle = (\lvert g\rangle+\lvert m\rangle)/\sqrt{2}$
-and the measurement operator is $M = \sigma_y^{gm} = -i\lvert g\rangle\langle m\rvert
-+ i\lvert m\rangle\langle g\rvert$.  The signal is
+Consider a qubit sensor whose pulse sequence is parametrised by a detuning
+$\delta$ from the target frequency.
+After the sequence, the qubit Bloch vector is $\vb{r}(\delta)$ and the noise
+susceptibility is characterised by the filter function $\vb{F}(\omega;\delta)$.
+
+A single-shot frequency estimate from measuring observable
+$\hat{B} = \vb{B}\cdot\boldsymbol{\sigma}$ has variance
+\begin{equation}\label{eq:variance}
+    \sigma^2_{\rm freq}(\delta)
+    = \frac{\chivar_B(\delta)}{\abs{\vb{B}\cdot\dot{\vb{r}}(\delta)}^2},
+\end{equation}
+where $\dot{\vb{r}} = \partial_\delta\vb{r}$ is the signal slope and the
+noise variance in the numerator is given by the Kubo linear-response formula
+\begin{equation}\label{eq:chi}
+    \chivar_B(\delta)
+    = \frac{2}{\pi}\int_0^\infty S(\omega)
+      \Bigl[\abs{\vb{F}(\omega;\delta)}^2
+            - \abs{\tilde{\vb{B}}\cdot\vb{F}(\omega;\delta)}^2\Bigr]d\omega,
+\end{equation}
+with $\tilde{\vb{B}} = R^{\mathsf{T}}(\delta)\,\vb{B}$ the measurement axis
+rotated into the toggling frame and $S(\omega)$ the one-sided noise power
+spectral density.
+
+\subsection*{Cramér--Rao optimal measurement direction}
+
+Minimising~\eqref{eq:variance} over $\vb{B}$ is achieved by choosing
+$\vb{B}_{\rm opt} = \dot{\vb{r}}/\abs{\dot{\vb{r}}}$, which gives the
+single-shot Cramér--Rao bound
+\begin{equation}\label{eq:cr-variance}
+    \sigma^2_{\rm CR}(\delta)
+    = \frac{\chivar_{\vb{B}_{\rm opt}}(\delta)}{\abs{\dot{\vb{r}}(\delta)}^2}.
+\end{equation}
+
+\subsection*{Sensitivity--noise tradeoff and detuning optimisation}
+
+Equation~\eqref{eq:cr-variance} reveals a fundamental tradeoff: $\delta$
+simultaneously controls the signal slope $\abs{\dot{\vb{r}}}$ and the noise
+susceptibility $\chivar$.  The optimal operating point is
+\begin{equation}\label{eq:dopt}
+    \dopt = \arg\min_\delta\;\sigma^2_{\rm CR}(\delta).
+\end{equation}
+In general $\dopt \neq 0$: operating off-resonance improves the figure of merit
+when the gain in noise rejection outweighs the loss in signal sensitivity.
+We define
+\begin{equation}\label{eq:fomdef}
+    \mathrm{FOM}(\delta)
+    = \frac{\abs{\dot{\vb{r}}(\delta)}^2}{\chivar_{\vb{B}_{\rm opt}}(\delta)}
+    = \frac{1}{\sigma^2_{\rm CR}(\delta)},
+\end{equation}
+so $\dopt$ is equally the maximiser of the FOM.
+
+\subsection*{Three-level Lambda clock}
+
+We study a Lambda system with levels $\lvert g\rangle$ (ground),
+$\lvert e\rangle$ (probe-excited), and $\lvert m\rangle$ (metastable clock
+state).  The QSP pulse sequence acts on the $\{g, e\}$ probe transition; the
+signal is read from the $\{g, m\}$ clock transition.
+All protocols use total interrogation time $T = 2\pi$ (with $\hbar = 1$,
+frequencies in rad\,s$^{-1}$).
+
+\paragraph{Laser detuning Hamiltonian.}
+The physically correct Hamiltonian for a laser detuned by $\delta$ from the
+$g$--$e$ resonance is
+\begin{equation}
+    H_\delta = \delta\,\lvert e\rangle\langle e\rvert.
+    \label{eq:hamiltonian}
+\end{equation}
+This is \emph{not} traceless in the probe subspace: it shifts only
+$\lvert e\rangle$, leaving $\lvert g\rangle$ and $\lvert m\rangle$ unchanged.
+Under a continuous drive at Rabi frequency $\Omega$ and detuning $\delta$ for
+duration $\tau$, the three-level propagator is
+\begin{equation}
+    U(\tau) = e^{-i\delta\tau/2}
+    \begin{pmatrix}
+        f & ig & 0 \\
+        ig^* & f^* & 0 \\
+        0 & 0 & e^{i\delta\tau/2}
+    \end{pmatrix},
+    \label{eq:propagator}
+\end{equation}
+where $f$, $g$ are the Cayley--Klein (CK) amplitudes for the SU(2) rotation in
+the probe subspace under the traceless Hamiltonian
+$\tilde{H} = \tfrac{\delta}{2}(\lvert e\rangle\langle e\rvert -
+\lvert g\rangle\langle g\rvert) + \tfrac{\Omega}{2}\vb{n}\cdot\boldsymbol{\sigma}$.
+The global probe phase $e^{-i\delta\tau/2}$ accumulates relative to
+$\lvert m\rangle$: ignoring it gives incorrect signal predictions for
+multi-segment sequences.
+
+\paragraph{State, observable, and clock signal.}
+The initial state is
+$\lvert\psi_0\rangle = (\lvert g\rangle+\lvert m\rangle)/\sqrt{2}$
+and the measurement operator is
+$M = \sigma_y^{gm} = -i\lvert g\rangle\langle m\rvert + i\lvert m\rangle\langle g\rvert$.
+The clock signal
 \begin{equation}
     S(\delta) = \langle\psi_0\rvert U^\dagger(\delta)\,M\,U(\delta)\lvert\psi_0\rangle
-              = -\operatorname{Im}[f(\delta)],
     \label{eq:signal}
 \end{equation}
-where $f(\delta)$ is the $(\lvert g\rangle,\lvert g\rangle)$ Cayley--Klein amplitude of the
-probe evolution at detuning $\delta$.
+is the $\hat{y}$-component of the $\{g,m\}$ clock-transition Bloch vector,
+i.e.\ $S = \vb{B}\cdot\vb{r}(\delta)$ with $\vb{B} = \hat{y}$.
+At $\delta = 0$ all protocols considered here have $S(0) = 0$ (zero crossing)
+and $\dot{S}(0) \neq 0$, so $\delta = 0$ is the quadrature operating point.
 
-\paragraph{Figure of merit.}
-The single-shot frequency estimation variance is bounded by
+\paragraph{Three-level filter function and $\sigma^2_\nu$.}
+The relevant noise variance for frequency estimation is the shot-to-shot
+variance of the classical signal mean $\langle M\rangle$:
 \begin{equation}
-    \sigma^2_\omega \geq \frac{\mathcal{K}(S)}{|\partial_\delta S|^2},
+    \mathcal{V}(\delta)
+    = \int_0^\infty \frac{d\omega}{2\pi}\, S(\omega)\, F(\omega;\delta),
+    \label{eq:kubo3}
+\end{equation}
+where the \emph{filter function} for the $\{g,m\}$ observable is
+\begin{equation}
+    F(\omega;\delta)
+    = \abs{\chi(\omega;\delta)}^2,
+    \quad
+    \chi = \mathcal{F}[\abs{g}^2],
+    \label{eq:Fe}
+\end{equation}
+obtained from the sensitivity trajectory $r(t)=i\abs{g(t)}^2$.
+The DC consistency condition $F(0) = \abs{\dot{S}(0)}^2$ ensures the filter
+function and sensitivity are not independent.
+The normalised frequency variance is
+\begin{equation}
+    \sigma^2_\nu(0)
+    = \frac{1}{\abs{\dot{S}(0)}^2}
+      \int_{\omega_{\rm min}}^\infty \frac{d\omega}{2\pi}\, S(\omega)\, F(\omega;0),
     \qquad
-    \mathcal{K}(S) = \int_0^\infty \frac{d\omega}{2\pi}\, S(\omega)\, F_e(\omega),
-    \label{eq:fom}
+    \omega_{\rm min} = \frac{2\pi}{T}.
+    \label{eq:fom3}
 \end{equation}
-where $F_e(\omega) = \tfrac{1}{2}|\Phi(\omega)|^2 + |\chi(\omega)|^2$ is the three-level
-filter function, $\Phi = \mathcal{F}[f^*(t)g(t)]$, $\chi = \mathcal{F}[|g(t)|^2]$, and
-$S(\omega)$ is the noise power spectral density.  We maximise the \emph{figure of merit}
-\begin{equation}
-    \mathrm{FOM} = \frac{|\partial_\delta S|^2}{\mathcal{K}(S)}.
-    \label{eq:fomdef}
-\end{equation}
-All protocols below use the same total interrogation time $T = 2\pi$ (in units where
-$\hbar = 1$ and frequencies are in rad\,s$^{-1}$).
+The lower cutoff $\omega_{\rm min} = 2\pi/T$ is the Fourier resolution limit:
+noise fluctuations slower than one measurement cycle of duration $T$ cannot
+be resolved by a single shot and should not contribute to the figure of merit.
+This \emph{bandlimited FOM} also removes degeneracy of the optimiser: solutions
+with $\chi(t)$ concentrated at $\omega < \omega_{\rm min}$ receive no benefit
+from their low noise variance.
+We consider two noise PSDs: white noise $S(\omega) = S_0$ and $1/f$ noise
+$S(\omega) = S_0/\abs{\omega}$.
 
 
 %% ─────────────────────────────────────────────────────────────────────────────
@@ -79,92 +190,80 @@ Two fast $\pi/2$ pulses flanking a free-evolution window:
 We use $\Omega_{\rm fast} = 20\pi$ so that $\tau_{\pi/2} \ll T$ and the sequence
 is effectively a pure free-evolution Ramsey.
 
-\paragraph{Signal and sensitivity.}
-At resonance ($\delta = 0$) the sequence maps $\lvert g\rangle \to
-(\lvert g\rangle - i\lvert e\rangle)/\sqrt{2}$ by the first $\pi/2$ pulse,
-then during free evolution $\lvert e\rangle \to e^{-i\delta\tau_{\rm free}/2}\lvert e\rangle$
-relative to $\lvert g\rangle$, and the second $\pi/2$ converts the phase back to population.
-The sensitivity at $\delta = 0$ is
+\paragraph{Sensitivity at $\delta = 0$.}
+The Ramsey sensitivity is
 \begin{equation}
-    \left.\frac{\partial S}{\partial\delta}\right|_{\delta=0}
+    \left.\partial_\delta S\right|_{\delta=0}
     \approx -\frac{T}{2},
     \qquad
     \left|\partial_\delta S\right|^2 \approx \frac{T^2}{4} = \pi^2.
     \label{eq:ramsey_sens}
 \end{equation}
 
-\paragraph{Operating point.} $\delta = 0$ (quadrature).
-
 
 \subsection{GPS: Integer Cycle, $m = 1$ and $m = 8$}
 
 \paragraph{Pulse sequence.}
 A single continuous Rabi drive on the $\{g,e\}$ probe transition for the full
-interrogation time $T$, with Rabi frequency $\Omega = 2\pi m / T$:
+interrogation time $T$, with Rabi frequency $\Omega = 2\pi m / T$ ($m$ complete
+Rabi cycles):
 \begin{equation}
-    \text{continuous drive at }\Omega = \frac{2\pi m}{T}\text{ for time }T
-    \quad (m \text{ complete Rabi cycles}).
+    \text{continuous drive at }\Omega = \frac{2\pi m}{T}\text{ for time }T.
     \label{eq:gps_seq}
 \end{equation}
 For our parameters: $m=1 \Rightarrow \Omega = 1$\,rad\,s$^{-1}$;
 $m=8 \Rightarrow \Omega = 8$\,rad\,s$^{-1}$.
 
-\paragraph{Exact signal.}
-The evolution propagator for a resonant ($\delta = 0$) drive is $U = (-i)^{2m}\,\mathbf{1}$
-(identity up to global phase), giving $S(0) = -\operatorname{Im}(f_0) = 0$.
-For arbitrary detuning:
+\paragraph{Exact clock signal.}
+With $H_\delta = \delta\lvert e\rangle\langle e\rvert$ the three-level clock
+signal for a single GPS pulse is
 \begin{equation}
-    S(\delta) = -\frac{\delta}{\Omega_{\rm eff}}\sin\!\left(\frac{m\pi\Omega_{\rm eff}}{\Omega}\right),
+    S(\delta) = \sin\!\left(\frac{\delta T}{2}\right)\cos\!\left(\frac{\Omega_R T}{2}\right)
+              - \frac{\delta}{\Omega_R}\cos\!\left(\frac{\delta T}{2}\right)
+                \sin\!\left(\frac{\Omega_R T}{2}\right),
     \qquad
-    \Omega_{\rm eff} = \sqrt{\Omega^2 + \delta^2}.
+    \Omega_R = \sqrt{\Omega^2 + \delta^2}.
     \label{eq:gps_signal}
 \end{equation}
+This differs from the probe-subspace-traceless formula $S = (\delta/\Omega_R)\sin(\Omega_R T/2)$;
+the two agree only at $\delta = 0$, where both vanish.
 
-\paragraph{Zero crossings.}
-$S(\delta_k) = 0$ when $m\pi\Omega_{\rm eff}/\Omega = k\pi$, i.e.\
-$\Omega_{\rm eff} = k\Omega/m$ for integer $k \geq m+1$, giving
+\paragraph{Sensitivity at $\delta = 0$.}
+Differentiating Eq.~\eqref{eq:gps_signal} and evaluating at $\delta = 0$
+(where $\Omega_R = \Omega$):
 \begin{equation}
-    \delta_k = \Omega\sqrt{\left(\frac{k}{m}\right)^2 - 1}.
-    \label{eq:gps_zeros}
+    \left.\partial_\delta S\right|_{\delta=0}
+    = \frac{T\,\Omega\,\cos(\Omega T/2) - 2\sin(\Omega T/2)}{2\Omega}.
+    \label{eq:gps_deriv}
 \end{equation}
-The slope (sensitivity) at each zero is
+For GPS $m$ with $\Omega T = 2\pi m$, we have $\sin(m\pi) = 0$ and
+$\cos(m\pi) = (-1)^m$, so
 \begin{equation}
-    \left.\frac{\partial S}{\partial\delta}\right|_{\delta_k}
-    = -(-1)^k\,\frac{m\pi}{\Omega}\left(1 - \frac{m^2}{k^2}\right),
+    \left.\partial_\delta S\right|_{\delta=0}
+    = \frac{(-1)^m\, T}{2},
     \qquad
-    \left|\partial_\delta S\right|^2_{\delta_k}
-    = \frac{\pi^2 m^2}{\Omega^2}\left(1 - \frac{m^2}{k^2}\right)^2.
-    \label{eq:gps_slope}
+    \left|\partial_\delta S\right|^2 = \frac{T^2}{4} = \pi^2
+    \quad\text{for any integer }m.
+    \label{eq:gps_sens}
 \end{equation}
-As $k \to \infty$, $|\partial_\delta S|^2 \to \pi^2 m^2/\Omega^2 = (T/2)^2$, the
-Ramsey limit.  The filter function at $\delta_k$ has deep nulls at all harmonics
-$n\Omega$ for $n = 1, \ldots, m-1$, strongly suppressing noise near these frequencies.
+All GPS $m$ at $\delta = 0$ therefore have \emph{the same sensitivity as
+Ramsey}.  The protocols differ only through their filter functions and the
+resulting noise variance $\mathcal{V}$.
 
-\paragraph{Operating points used here.}
-For $m = 1$ ($\Omega = 1$) we use $k = 4$:
-\begin{equation}
-    \delta_4 = \sqrt{15}\,\approx 3.873,
-    \qquad
-    |\partial_\delta S|^2 = \pi^2\!\left(\frac{15}{16}\right)^2 \approx 8.67.
-    \label{eq:gps1_op}
-\end{equation}
-For $m = 8$ ($\Omega = 8$) we use the first zero, $k = 9$:
-\begin{equation}
-    \delta_9 = \sqrt{17}\,\approx 4.123,
-    \qquad
-    |\partial_\delta S|^2 = \pi^2\!\left(\frac{17}{81}\right)^2 \approx 0.434.
-    \label{eq:gps8_op}
-\end{equation}
-The choice of $k$ trades higher sensitivity (larger $k$) against increased detuning
-(which shifts the operating point further from resonance).  The fourth zero of GPS~$m=1$
-provides the best FOM at white noise among the first few zeros.
+\paragraph{Operating point.}
+We operate all GPS protocols at $\delta = 0$.  Previous analyses identified
+zero-crossings of the old (probe-subspace-traceless) formula as operating points;
+those zeros are \emph{not} zeros of the correct signal
+Eq.~\eqref{eq:gps_signal}.  For GPS $m=1$, the new signal has no non-trivial
+zeros at all.  For GPS $m=8$, non-trivial zeros do exist (e.g.\ at
+$\delta \approx 1.008$), but $\sigma^2_\nu$ at those zeros is higher than at $\delta = 0$.
 
 
 \subsection{Optimal Equiangular $N$-Segment Sequence}
 
 \paragraph{Pulse sequence.}
 The sequence is divided into $N$ equal segments of duration $\tau = T/N$.
-Each segment is a continuous drive on the probe transition at shared Rabi frequency
+Each segment is a continuous drive at shared Rabi frequency
 $\Omega$ with drive axis $(\cos\phi_k, \sin\phi_k, 0)$:
 \begin{equation}
     \prod_{k=1}^{N} \exp\!\left(-i\,\frac{\Omega\tau}{2}\,
@@ -175,39 +274,36 @@ The first phase is fixed to $\phi_1 = 0$ by gauge choice; the free parameters ar
 $\Omega > 0$ and $\phi_2, \ldots, \phi_N$.
 
 \paragraph{Optimisation.}
-We minimise $\mathrm{FOM}^{-1} = \mathcal{K}(S) / |\partial_\delta S|^2$ over
+We minimise $\sigma^2_\nu = \mathcal{V}(S) / |\partial_\delta S|^2$ over
 $(\Omega, \phi_2, \ldots, \phi_N)$ using differential evolution (global search)
 followed by L-BFGS-B polishing.
 The noise PSD is white ($S(\omega) = S_0$).
 
 \paragraph{Result for $N = 4$.}
-The global optimum converges to the lower-bound Rabi frequency $\Omega T = \pi/10 \approx 0.314$
-(i.e.\ $\Omega \approx \pi/(10T)$), with the sequence acting as near-free evolution
-with phase kicks.  The optimal phases from the numerical optimisation are
+The numerical optimum converges to $\Omega T \approx 8.18$ with phases
 \begin{equation}
-    \phi^* = [0,\;2.099,\;3.262,\;4.799]\ \text{rad}.
+    \phi^* = [0,\;1.476,\;0.154,\;1.178]\ \text{rad},
+    \qquad \Omega \approx 1.302\ \text{rad\,s}^{-1}.
     \label{eq:eq_phases}
 \end{equation}
-The filter function shows near-complete low-frequency suppression below
-$\omega \sim 4/T$, leading to dramatically reduced Kubo variance under white noise.
+Unlike the equiangular-in-phase (CPMG-like) limit $\Omega T \ll 1$, the optimum
+uses a non-trivial Rabi frequency that shapes the filter function to reduce the
+noise variance while preserving $|\partial_\delta S|^2 \approx \pi^2$.
 
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Filter function comparison}
 %% ─────────────────────────────────────────────────────────────────────────────
 
-Figure~\ref{fig:filter_comparison} shows $F_e(\omega)/T^2$ for all four protocols.
+Figure~\ref{fig:filter_comparison} shows $F(\omega)/T^2 = |\chi(\omega)|^2/T^2$ for all four protocols.
 
 \begin{figure}[h]
     \centering
     \includegraphics[width=\linewidth]{protocol_comparison.png}
     \caption{%
-        Three-level clock filter functions $F_e(\omega)/T^2$ at equal total
-        time $T = 2\pi$ (FFT, $n=4096$, zero-pad $\times 4$).
-        \textbf{GPS protocols} are evaluated at their zero-crossing operating
-        points (Eqs.~\eqref{eq:gps1_op}--\eqref{eq:gps8_op}).
-        \textbf{Equiangular $N=4$} is at $\delta = 0$ with numerically optimised
-        phases.
+        Three-level clock filter functions $F(\omega)/T^2 = |\chi(\omega)|^2/T^2$
+        at equal total time $T = 2\pi$ (FFT, $n=4096$, zero-pad $\times 4$).
+        All protocols at $\delta = 0$.
         Dotted vertical lines mark harmonics $k\Omega$ of the two GPS Rabi
         frequencies ($\Omega = 1$ blue; $\Omega = 8$ green).
     }
@@ -219,37 +315,32 @@ Figure~\ref{fig:filter_comparison} shows $F_e(\omega)/T^2$ for all four protocol
 \begin{enumerate}
 
     \item \textbf{Ramsey: flat, broadband sensitivity.}
-          $F_e^{\rm Ramsey}(\omega) \sim T^2/4$ at all frequencies below
+          $F_e^{\rm Ramsey}(\omega) \approx T^2/4$ at all frequencies below
           $\sim\!\Omega_{\rm fast}$, with a quadratic roll-off above.
-          All noise in the bandwidth is accumulated, giving a modest FOM.
 
-    \item \textbf{GPS $m=1$: notches at harmonics of $\Omega$.}
-          At the $k=4$ zero-crossing, $F_e$ is suppressed at all multiples of
-          $\Omega = 1$: $\omega = 1, 2, 3, \ldots$ The first $(m-1) = 0$ harmonics
-          below $\Omega$ carry the Kubo integral; for $m=1$ the noise reduction is
-          mild.  The low-frequency floor is significantly lower than Ramsey due to
-          the continuous driving, and the FOM exceeds Ramsey by a factor $\sim 8$.
+    \item \textbf{GPS $m=1$: $F_e$ concentrated near $\Omega = 1$.}
+          The resonant drive at $\Omega = 1$ produces CK amplitudes
+          $f(t) = \cos(\Omega t/2)$, $g(t) = -i\sin(\Omega t/2)$.
+          The filter function $F_e$ has its main spectral content near
+          $\omega = \Omega = 1$ (a peak there, reflecting $|g|^2 \sim \sin^2(\Omega t/2)$)
+          and is very small above $\omega \approx 4$.
+          Under white noise this concentration near a single low frequency
+          gives a noise integral slightly above Ramsey (see Table~\ref{tab:summary}).
 
-    \item \textbf{GPS $m=8$, $k=9$: eight harmonics but poor white-noise FOM.}
-          The filter function shows strong suppression at $\omega = 8, 16, 24, \ldots$
-          and a clear harmonic comb.  However, the sensitivity at the $k=9$ first zero
-          is only $|\partial_\delta S|^2 = 0.435$—just 4.4\% of the Ramsey value—because
-          $(17/81)^2 \ll 1$.  Simultaneously the Kubo variance $0.88$ is \emph{larger}
-          than Ramsey's $0.63$, so the resulting $\mathrm{FOM} = 0.49$ is worse than
-          Ramsey.  The utility of GPS $m=8$ is therefore not broadband white noise, but
-          \emph{targeted rejection} of noise at specific harmonic frequencies
-          $\omega = k\Omega$.  A competitive FOM requires going to $k \gg 9$ to recover
-          sensitivity at the cost of a larger operating detuning.
+    \item \textbf{GPS $m=8$: $F_e$ peaked at $\Omega = 8$ and $2\Omega = 16$.}
+          The eight-cycle drive shifts the $F$ peak to $\omega \approx 8$
+          and its harmonic at $\omega \approx 16$.  Between $\omega = 1$ and $8$,
+          $F$ is moderate, giving a noise integral very close to GPS $m=1$.  The $1/f$ noise $\sigma^2_\nu$ of GPS $m=8$
+          is substantially better than GPS $m=1$ because $1/f$ noise weights
+          low frequencies heavily, and GPS $m=8$'s $F$ peak sits at $\omega = 8$
+          where the $1/f$ weight is eight times smaller than at $\omega = 1$.
 
-    \item \textbf{Equiangular $N=4$: extreme low-frequency suppression.}
-          The optimal $N=4$ sequence at $\Omega T \approx 0.314$ essentially acts
-          as a CPMG-like sequence with four equal free-evolution windows and phase
-          kicks at $t = T/4, T/2, 3T/4$.
-          $F_e(\omega)$ is suppressed by many orders of magnitude below $\omega \sim 4/T$,
-          and the integrated Kubo variance under white noise is $\sim 10^4$ times smaller
-          than Ramsey.  Crucially, the sensitivity $|\partial_\delta S|^2$ is preserved
-          at the Ramsey value $\approx \pi^2$, so the FOM gain is entirely due to
-          noise reduction.
+    \item \textbf{Equiangular $N=4$: shaped suppression.}
+          The optimal phases produce a filter function that sits below Ramsey
+          across a broad low-to-mid frequency band while maintaining full
+          sensitivity $|\partial_\delta S|^2 \approx \pi^2$.
+          The noise integral under white noise is below Ramsey,
+          giving the best white-noise $\sigma^2_\nu$ of the four protocols.
 
 \end{enumerate}
 
@@ -262,23 +353,25 @@ Figure~\ref{fig:filter_comparison} shows $F_e(\omega)/T^2$ for all four protocol
 \centering
 \begin{tabular}{lrrrr}
 \toprule
-Protocol & $|\partial_\delta S|^2$ & $\mathcal{K}_{\rm white}$ & $\mathrm{FOM}_{\rm white}$
-         & $\mathrm{FOM}_{1/f}$ \\
+Protocol & $|\partial_\delta S|^2$ & $\mathcal{V}_{\rm white}$ & $\sigma^2_{\nu,{\rm white}}$
+         & $\sigma^2_{\nu,1/f}$ \\
 \midrule
-Ramsey                             & $9.813$  & $0.629$               & $15.6$    & $7.2$     \\
-GPS $m{=}1$, $k{=}4$ zero         & $8.674$  & $6.62\times10^{-2}$   & $131$     & $172$     \\
-GPS $m{=}8$, $k{=}9$ zero (first) & $0.435$  & $0.882$               & $0.49$    & $0.60$    \\
-Equiangular $N{=}4$                & $9.821$  & $1.25\times10^{-4}$   & $78{,}800$ & $53{,}000$ \\
+Ramsey                    & $9.81$  & $7.97\times10^{-2}$ & $8.12\times10^{-3}$ & $3.68\times10^{-3}$ \\
+GPS $m{=}1$, $\delta{=}0$ & $9.87$  & $9.66\times10^{-2}$ & $9.79\times10^{-3}$ & $8.32\times10^{-3}$ \\
+GPS $m{=}8$, $\delta{=}0$ & $9.87$  & $4.67\times10^{-1}$ & $4.73\times10^{-2}$ & $9.08\times10^{-3}$ \\
+Equiangular $N{=}4$       & $8.13$  & $3.27\times10^{-2}$ & $4.02\times10^{-3}$ & $3.04\times10^{-3}$ \\
+Equiangular $N{=}8$       & $14.79$ & $7.29\times10^{-2}$ & $4.93\times10^{-3}$ & $2.37\times10^{-3}$ \\
+Equiangular $N{=}16$      & $14.55$ & $1.18\times10^{-1}$ & $8.09\times10^{-3}$ & $3.36\times10^{-3}$ \\
 \bottomrule
 \end{tabular}
 \caption{%
-    Sensing performance at $T = 2\pi$ under white and $1/f$ noise (computed by
-    \texttt{scripts/plot\_protocol\_comparison.py}).
-    Equiangular optimal phases: $\phi^* = [0,\ 2.099,\ 3.262,\ 4.799]$\,rad.
-    GPS $m{=}8$ at its \emph{first} zero ($k{=}9$) performs \emph{worse} than Ramsey
-    because the sensitivity is heavily penalised ($(17/81)^2 \approx 4.4\%$ of $\pi^2$)
-    and the Kubo variance is not sufficiently suppressed at this operating detuning;
-    higher zeros $k \gg 9$ recover more sensitivity at the cost of larger $\delta_k$.%
+    Sensing performance at $T = 2\pi$ under white and $1/f$ noise, with the
+    corrected filter function $F = |\chi|^2$ (population channel only) and
+    bandlimited FOM integrating from $\omega_{\rm min} = 2\pi/T$ (Eq.~\eqref{eq:fom3}).
+    All protocols evaluated at $\delta = 0$.
+    Equiangular sequences optimised under white-noise bandlimited FOM.
+    $N{=}4$ optimal parameters: $\Omega T \approx 8.18$,
+    $\phi^* = [0,\,1.476,\,0.154,\,1.178]$\,rad.%
 }
 \label{tab:summary}
 \end{table}
@@ -288,55 +381,158 @@ Equiangular $N{=}4$                & $9.821$  & $1.25\times10^{-4}$   & $78{,}80
 \section{Discussion}
 %% ─────────────────────────────────────────────────────────────────────────────
 
-\subsection*{Why equiangular dominates}
+\subsection*{Effect of correcting the laser-detuning Hamiltonian}
 
-The equiangular sequence achieves the Ramsey sensitivity $|\partial_\delta S|^2 \approx T^2/4$
-\emph{and} suppresses noise by $\sim 10^4$.  This is possible because for $\Omega T \ll 1$
-each segment approximates free evolution, but the phase kicks $\phi_k$ at segment
-boundaries act as $z$-axis rotations in the toggling frame.  With $N = 4$ segments and
-optimised phases, the effective filter function has four zeros at $\omega \to 0$, the
-maximum achievable by a length-$N$ sequence.
+Previous analyses used the probe-subspace-traceless Hamiltonian
+$\tilde{H}_\delta = \frac{\delta}{2}(\lvert e\rangle\langle e\rvert -
+\lvert g\rangle\langle g\rvert)$, which assigns a \emph{global} probe phase
+$e^{-i\delta\tau/2}$ relative to $\lvert m\rangle$ that is absent in the
+traceless formula.  This phase is invisible in a two-level analysis but
+shifts the signal in the three-level clock.
 
-In contrast, GPS protocols are constrained to a single continuous Rabi drive with
-$\Omega T = 2\pi m$.  The filter function nulls are fixed at the Rabi harmonics and
-cannot be moved.  The Kubo variance is therefore limited by the noise between harmonics
-and the low-frequency floor, which—while far below Ramsey—cannot match the exponential
-suppression of the equiangular CPMG-like optimum.
+Under the corrected Hamiltonian (Eq.~\eqref{eq:hamiltonian}), the GPS clock
+signal takes the form Eq.~\eqref{eq:gps_signal}, not the simpler formula
+$(\delta/\Omega_R)\sin(\Omega_R T/2)$.  As a consequence:
+\begin{enumerate}
+    \item The old zero-crossing operating points $\delta_k = \Omega\sqrt{(k/m)^2 - 1}$
+          are \emph{not} zeros of the correct signal.
+    \item For GPS $m=1$, the corrected signal has no non-trivial zeros.
+    \item For GPS $m=8$, non-trivial zeros exist (e.g.\ $\delta \approx 1.008$) but
+          they provide a \emph{lower} FOM than $\delta = 0$ because the drop in
+          sensitivity ($|\partial_\delta S|^2 \approx 9.04$) is not compensated
+          by a sufficient reduction in noise variance.
+    \item At $\delta = 0$, all GPS $m$ recover sensitivity $|\partial_\delta S|^2 = T^2/4$,
+          identical to Ramsey (Eq.~\eqref{eq:gps_sens}).
+\end{enumerate}
+The conclusion: GPS protocols operating at $\delta = 0$ have
+\emph{worse} white-noise $\sigma^2_\nu$ than Ramsey, because their filter
+functions accumulate more white noise despite equal sensitivity.
 
-\subsection*{1/f noise}
+\subsection*{White-noise $\sigma^2_\nu$ ordering}
 
-Under $1/f$ noise ($S(\omega) = S_0/|\omega|$), the advantage of low-frequency
-suppression grows further: the equiangular FOM exceeds GPS by a larger factor than
-under white noise.  The GPS protocols benefit less from their harmonic comb because
-$1/f$ noise is most severe at the lowest frequencies, which neither GPS $m=1$ nor
-GPS $m=8$ efficiently suppresses near $\omega \to 0$.
+The $\sigma^2_\nu$ ordering under white noise (smaller is better) is:
+\[
+  \text{Eq. } N{=}4 \;<\; \text{Eq. } N{=}8 \;<\; \text{Ramsey}
+  \;\approx\; \text{Eq. } N{=}16 \;<\; \text{GPS }m{=}1 \;\ll\; \text{GPS }m{=}8.
+\]
+Equiangular $N{=}4$ achieves $\sigma^2_{\nu,\rm white} = 4.02\times10^{-3}$, roughly
+$2\times$ better than Ramsey ($8.12\times10^{-3}$), while GPS $m{=}8$ is
+$\sim\!6\times$ worse ($4.73\times10^{-2}$) because its chi trajectory oscillates
+at $\omega = 8$ and $2\omega = 16$, far above the region of lowest noise weight.
+Both GPS protocols have bandlimited noise integrals above Ramsey because the
+single continuous drive concentrates $F$ near the Rabi harmonic $\Omega$, which
+under flat white noise contributes heavily to $\mathcal{V}$.
 
-\subsection*{GPS: role of operating point}
+\subsection*{$1/f$ noise}
 
-For GPS $m$ cycles, the FOM at the $k$-th zero scales as
-\begin{equation}
-    \mathrm{FOM}_k \propto \frac{|\partial_\delta S|^2_k}{\mathcal{K}(\delta_k)}
-    = \frac{\pi^2 m^2}{\Omega^2}\left(1 - \frac{m^2}{k^2}\right)^2
-      \bigg/ \mathcal{K}(\delta_k),
-    \label{eq:gps_fom_scaling}
-\end{equation}
-where the Kubo variance $\mathcal{K}(\delta_k)$ decreases as $k$ increases because
-$\delta_k$ pushes the operating frequency further from the noise-dominated near-resonant
-band.  For $m = 1$, the FOM increases monotonically with $k$, reaching
-$\mathrm{FOM}_{\rm white} \approx 131$ at $k = 4$.
+Under $1/f$ noise ($S(\omega) = S_0/|\omega|$), the ordering shifts:
+\[
+  \text{Eq. } N{=}8 \;<\; \text{Eq. } N{=}4 \;<\; \text{Eq. } N{=}16
+  \;\approx\; \text{Ramsey} \;<\; \text{GPS }m{=}8 \;<\; \text{GPS }m{=}1.
+\]
+GPS $m=8$'s $F$ is concentrated near $\omega = 8$, not near $\omega = 1$.
+Under $1/f$ noise the weight $1/\omega$ at $\omega = 8$ is
+eight times smaller than at $\omega = 1$, so GPS $m=8$ accumulates an
+eight-times-smaller noise contribution per unit $F$ peak.  This is why
+GPS $m=8$ ($9.08\times10^{-3}$) outperforms GPS $m=1$ ($8.32\times10^{-3}$)
+under $1/f$ noise even though GPS $m=8$ is far \emph{worse} under white noise:
+the distinction is \emph{where} their $F$ is non-zero, not its total integral.
+Equiangular $N{=}8$ achieves the best $1/f$ performance ($2.37\times10^{-3}$)
+by placing chi oscillation in a mid-frequency band that is less exposed to $1/f$
+weight than GPS $m=1$ but less penalised by flat white noise than GPS $m=8$.
 
-For $m = 8$, the sensitivity prefactor at the first zero ($k=9$) is
-$(1 - 64/81)^2 = (17/81)^2 \approx 0.044$, reducing $|\partial_\delta S|^2$ to
-only $0.435$—far below the Ramsey limit.  Moreover, at $\delta_9 = \sqrt{17} \approx 0.52\,\Omega$,
-the effective Rabi frequency $\Omega_{\rm eff} = 9$ gives a non-integer number of cycles
-relative to the observation window, so the filter function comb does not fully suppress
-the white-noise integral, leaving $\mathcal{K}_{\rm white} = 0.88 > \mathcal{K}_{\rm Ramsey}$.
-The net result is $\mathrm{FOM}_{\rm white}(m=8, k=9) = 0.49$, worse than Ramsey.
-To achieve $\mathrm{FOM} > 1$ for GPS $m=8$, one must use $k \geq 16$ (where
-sens\_sq $\approx 5.55$), accepting a large operating detuning $\delta_{16} = 8\sqrt{3} \approx 13.9$.
+\subsection*{High-frequency noise}
 
-The primary utility of GPS $m=8$ is therefore \emph{not} broadband white-noise
-suppression, but rather targeted rejection of noise near the harmonic frequencies
-$n\Omega$ for $n = 1, \ldots, m{-}1$—a feature that has no analogue in Ramsey or equiangular sequences.
+In atomic clock experiments the local-oscillator (LO) noise spectrum is
+typically $1/f$ below $\sim$1\,Hz and white (flat) at higher offset frequencies.
+The filter function / Dick-effect framework captures both regimes.
+
+\paragraph{$F_e$ structure of GPS protocols at $\delta = 0$.}
+For a resonant continuous drive at Rabi frequency $\Omega$ (i.e.\ $\delta = 0$),
+the CK amplitudes are $f(t) = \cos(\Omega t/2)$ and $g(t) = -i\sin(\Omega t/2)$.
+The filter function involves $|g(t)|^2 = \sin^2(\Omega t/2)$, which oscillates
+at frequency $\Omega$.  Its Fourier transform has a DC component and a
+\emph{peak} at $\omega = \Omega$ (and weaker harmonics at $2\Omega, 3\Omega,\ldots$).
+This is fundamentally different from a comb of \emph{nulls}: at $\delta = 0$,
+GPS protocols have $F_e$ \emph{peaks} at their Rabi harmonics, not zeros.
+
+\paragraph{High-pass white noise.}
+The FOM under high-pass white noise $S(\omega) = \theta(\omega - \omega_c)$
+is shown in Table~\ref{tab:hfnoise} and Fig.~\ref{fig:hf_comparison} (right).
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrrr}
+\toprule
+Protocol & $\omega_c = 0$ & $\omega_c = 1$ & $\omega_c = 4$ & $\omega_c = 8$ & $\omega_c = 16$ \\
+\midrule
+Ramsey                &  11.0 &    83.9 &      304 &      565 &     1\,004 \\
+GPS $m{=}1$           &   8.4 &    58.5 &   41\,886 &  368\,778 &  3\,022\,971 \\
+GPS $m{=}8$           &   8.4 &    14.9 &       16.6 &      37.8 &    25\,692 \\
+Equiangular $N{=}4$   &  11.3 &    77.3 &    5\,879 &   21\,372 &    53\,482 \\
+\bottomrule
+\end{tabular}
+\caption{FOM under high-pass white noise $S = \theta(\omega - \omega_c)$.
+         $\omega_c = 0$ corresponds to the full white-noise FOM
+         (slight differences from Table~\ref{tab:summary} reflect the higher FFT
+         resolution used here, $n = 8192$, pad $\times 8$).}
+\label{tab:hfnoise}
+\end{table}
+
+\noindent The dominant feature is GPS $m=1$: its $F_e$ peak at $\omega = 1$ is so
+narrow that once $\omega_c > 1$ the remaining Kubo integral is tiny, giving
+$\mathrm{FOM}_{1\text{-}{\rm pass}} \sim 10^4$--$10^6$.  This is the
+\emph{high-frequency advantage of GPS with a small Rabi frequency}: by
+concentrating spectral sensitivity at a single low frequency $\Omega$, any
+noise above $\Omega$ is almost entirely rejected.
+
+GPS $m=8$ shows no comparable advantage because its $F_e$ peak is at the
+\emph{higher} frequency $\Omega = 8$; noise between $\omega_c = 1$ and $8$ is
+still admitted (FOM barely improves from 8.4 to 16.6 as $\omega_c$ goes from
+0 to 4).  Only after $\omega_c$ clears both the $\Omega = 8$ and $2\Omega = 16$
+peaks does GPS $m=8$'s FOM improve dramatically.
+
+Equiangular $N=4$ sits between: $F_e$ is significantly suppressed above
+$\omega \approx 4$, giving $\mathrm{FOM} \sim 10^4$ for $\omega_c = 8$.
+
+\paragraph{Noise concentrated at a specific frequency.}
+For a Lorentzian noise peak $S(\omega) \propto [(\omega - \omega_{\rm tech})^2 +
+\Gamma^2]^{-1}$, the FOM depends strongly on whether $\omega_{\rm tech}$ falls
+near a $F_e$ peak or a zero.  At $\omega_{\rm tech} = 8$ (the GPS $m=8$ Rabi
+harmonic), GPS $m=8$ performs the \emph{worst}
+($\mathrm{FOM} \approx 3$) because $F_e$ has a peak there.  Equiangular ($\mathrm{FOM} \approx 573$)
+and Ramsey ($\mathrm{FOM} \approx 304$) are far superior.
+
+\paragraph{Practical implication.}
+The GPS ``integer cycle'' design was originally motivated by nulls in the
+\emph{old} (probe-subspace-traceless) filter function at Rabi harmonics.  With
+the correct Hamiltonian $H_\delta = \delta|e\rangle\langle e|$ at $\delta = 0$,
+these nulls become peaks.  The high-frequency advantage of a GPS-$m$ protocol
+is not targeted notching but rather \emph{spectral concentration}: by
+choosing $\Omega$ to place the $F_e$ peak well below the noise floor
+$\omega_c$, the protocol achieves near-perfect high-frequency rejection.
+The optimal choice is the smallest $\Omega$ that still provides sufficient
+sensitivity (i.e.\ $|\partial_\delta S|^2 > 0$ at the operating point)—which
+for any GPS $m$ at $\delta = 0$ is automatically satisfied with
+$|\partial_\delta S|^2 = \pi^2$.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.48\linewidth]{hf_noise_fom_vs_cutoff.png}
+    \hfill
+    \includegraphics[width=0.48\linewidth]{hf_noise_lorentzian.png}
+    \caption{%
+        \textbf{Left:} FOM under high-pass white noise $S(\omega) =
+        \theta(\omega - \omega_c)$ as a function of cutoff $\omega_c$.
+        Dotted lines mark the GPS $m=8$ Rabi harmonics $k\Omega = 8k$.
+        GPS $m=1$ diverges rapidly above $\omega_c \approx 1$ because its
+        $F_e$ is concentrated near $\omega = 1$ and is near-zero above $\omega = 4$.
+        \textbf{Right:} FOM under a Lorentzian noise peak
+        $S(\omega) \propto[(\omega - \omega_{\rm peak})^2 + 0.09]^{-1}$.
+        GPS $m=8$'s FOM collapses at $\omega_{\rm peak} = 8$ because $F_e$ has
+        a peak there; equiangular and GPS $m=1$ are robust.
+        All protocols at $\delta = 0$, $T = 2\pi$.
+    }
+    \label{fig:hf_comparison}
+\end{figure}
 
 \end{document}

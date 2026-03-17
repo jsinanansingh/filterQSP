@@ -25,8 +25,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.integrate import simpson
-from datetime import datetime
-
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -65,16 +63,6 @@ def _sanitize(label):
     return label.replace('/', 'f').replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
 
 
-def _timestamp():
-    """Return a filesystem-safe local timestamp."""
-    return datetime.now().strftime('%Y%m%d_%H%M%S')
-
-
-def _cache_path_for_timestamp():
-    """Return a timestamped QSP cache path."""
-    return OUTPUT_DIR / f'{CACHE_PREFIX}_{_timestamp()}.npz'
-
-
 def find_latest_cache_path():
     """Return the newest timestamped QSP cache, or None if absent."""
     matches = sorted(OUTPUT_DIR.glob(f'{CACHE_PREFIX}_*.npz'))
@@ -86,70 +74,25 @@ def find_latest_cache_path():
     return None
 
 
-def save_opt_cache(res_eq4, qsp_results):
-    """Save optimized parameters to a timestamped npz cache file."""
-    d = {
-        'eq4_omega':          np.array(res_eq4.omega),
-        'eq4_phases':         res_eq4.phases,
-        'eq4_sensitivity_sq': np.array(res_eq4.sensitivity_sq),
-        'eq4_noise_var':      np.array(res_eq4.noise_var),
-        'eq4_sigma_nu':       np.array(res_eq4.sigma_nu),
-        'eq4_objective_score': np.array(res_eq4.objective_score),
-        'eq4_objective_mode':  np.array(res_eq4.objective_mode),
-    }
-    for n, noise_dict in qsp_results.items():
-        for nlabel, r in noise_dict.items():
-            k = f'qsp_n{n}_{_sanitize(nlabel)}'
-            d[f'{k}_thetas']         = r.thetas
-            d[f'{k}_phis']           = r.phis
-            d[f'{k}_omega_fast']     = np.array(r.omega_fast)
-            d[f'{k}_tau_free']       = np.array(r.tau_free)
-            d[f'{k}_sensitivity_sq'] = np.array(r.sensitivity_sq)
-            d[f'{k}_noise_var']      = np.array(r.noise_var)
-            d[f'{k}_sigma_nu']       = np.array(r.sigma_nu)
-            d[f'{k}_objective_score'] = np.array(r.objective_score)
-            d[f'{k}_objective_mode']  = np.array(r.objective_mode)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = _cache_path_for_timestamp()
-    np.savez(str(cache_path), **d)
-    print(f'Optimization cache saved: {cache_path}')
-    return cache_path
-
-
 def load_opt_cache(system, noise_labels, qsp_ns):
     """
-    Load cached optimization results and rebuild sequences.
-    Returns (res_eq4, qsp_results) if cache exists, else None.
+    Load cached QSP results and rebuild sequences.
+
+    Equiangular N=4 is loaded from the equiangular cache (run_equiangular_optimization.py).
+    Returns (res_eq4, qsp_results) if both caches exist, else None.
     """
-    cache_path = find_latest_cache_path()
-    if cache_path is None:
+    from plot_protocol_comparison import find_latest_equiangular_cache
+
+    # ── QSP cache ─────────────────────────────────────────────────────────────
+    qsp_cache_path = find_latest_cache_path()
+    if qsp_cache_path is None:
         return None
     try:
-        c = np.load(str(cache_path))
+        c = np.load(str(qsp_cache_path))
     except Exception as e:
-        print(f'Cache load failed ({e}), re-optimizing.')
+        print(f'QSP cache load failed ({e}).')
         return None
 
-    # Rebuild equiangular sequence
-    omega  = float(c['eq4_omega'])
-    phases = c['eq4_phases']
-    tau    = T / len(phases)
-    from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
-    seq_eq4 = MultiLevelPulseSequence(system, system.probe)
-    for phi in phases:
-        seq_eq4.add_continuous_pulse(omega, [np.cos(phi), np.sin(phi), 0.0], 0.0, tau)
-    seq_eq4.compute_polynomials()
-    res_eq4 = PulseOptimizationResult(
-        omega=omega, phases=phases,
-        sensitivity_sq=float(c['eq4_sensitivity_sq']),
-        noise_var=float(c['eq4_noise_var']),
-        sigma_nu=float(c['eq4_sigma_nu']),
-        objective_score=float(c['eq4_objective_score']) if 'eq4_objective_score' in c else float(c['eq4_sigma_nu']),
-        objective_mode=c['eq4_objective_mode'].item() if 'eq4_objective_mode' in c else 'sigma_nu',
-        noise_label='white', seq=seq_eq4,
-    )
-
-    # Rebuild QSP sequences
     qsp_results = {n: {} for n in qsp_ns}
     for n in qsp_ns:
         for nlabel in noise_labels:
@@ -169,8 +112,34 @@ def load_opt_cache(system, noise_labels, qsp_ns):
                 objective_mode=c[f'{k}_objective_mode'].item() if f'{k}_objective_mode' in c else 'sigma_nu',
                 noise_label=nlabel, seq=seq,
             )
+    print(f'Loaded QSP results from cache: {qsp_cache_path}')
 
-    print(f'Loaded optimization results from cache: {cache_path}')
+    # ── Equiangular N=4 from equiangular cache ────────────────────────────────
+    eq_cache_path = find_latest_equiangular_cache()
+    if eq_cache_path is None:
+        raise FileNotFoundError(
+            'No equiangular cache found. Run scripts/run_equiangular_optimization.py first.'
+        )
+    ec = np.load(str(eq_cache_path), allow_pickle=True)
+    omega  = float(ec['eq_N4_white_omega'])
+    phases = ec['eq_N4_white_phases']
+    tau    = T / len(phases)
+    from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
+    seq_eq4 = MultiLevelPulseSequence(system, system.probe)
+    for phi in phases:
+        seq_eq4.add_continuous_pulse(omega, [np.cos(phi), np.sin(phi), 0.0], 0.0, tau)
+    seq_eq4.compute_polynomials()
+    res_eq4 = PulseOptimizationResult(
+        omega=omega, phases=phases,
+        sensitivity_sq=float(ec['eq_N4_white_sens_sq']),
+        noise_var=float(ec['eq_N4_white_noise_var']),
+        sigma_nu=float(ec['eq_N4_white_sigma_nu']),
+        objective_score=float(ec['eq_N4_white_objective_score']) if 'eq_N4_white_objective_score' in ec else float(ec['eq_N4_white_sigma_nu']),
+        objective_mode=ec['eq_N4_white_objective_mode'].item() if 'eq_N4_white_objective_mode' in ec else 'sigma_nu',
+        noise_label='white', seq=seq_eq4,
+    )
+    print(f'Loaded equiangular N=4 from cache: {eq_cache_path}')
+
     return res_eq4, qsp_results
 
 
@@ -250,8 +219,8 @@ def main():
     seq_gps1 = build_gps(system, 1)
     seq_gps8 = build_gps(system, 8)
 
-    qsp_ns     = [3, 5, 9]
-    qsp_colors = {3: 'C4', 5: 'C5', 9: 'C6'}
+    qsp_ns     = [4, 8, 13]
+    qsp_colors = {4: 'C4', 8: 'C5', 13: 'C6'}
 
     # ── Load from cache (required; run scripts/run_optimization.py to generate) ─
     cached = load_opt_cache(system, noise_labels, qsp_ns)

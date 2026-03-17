@@ -201,7 +201,31 @@ def _objective_from_metrics(
     noise_ref: float,
     objective_weight: float,
 ) -> float:
-    """Return a minimisation objective from sequence metrics."""
+    """Return a minimisation objective from sequence metrics.
+
+    Modes
+    -----
+    'sigma_nu'
+        Minimise noise_var / sens_sq  (normalised frequency variance).
+    'normalized_difference'
+        Maximise sens_sq/sens_ref - weight * noise_var/noise_ref  (returned
+        negated so the optimiser minimises).
+    'inv_sens_plus_noise'
+        Minimise  1/sens_sq + noise_var/sens_sq^2  =  (1 + sigma_nu)/sens_sq.
+        Both terms have the same units (1/sens_sq).  Positive-definite and
+        simultaneously rewards high sensitivity and low noise variance.
+    'inv_sens_plus_ramsey_noise'
+        Minimise  1/sens_sq + noise_var/noise_ref.
+        noise_ref is the Ramsey noise variance for the same noise PSD.
+        Normalises the noise penalty by a fixed (protocol-independent) scale,
+        so the two terms are independently interpretable.
+    'ramsey_normalized'
+        Minimise  sens_ref/sens_sq + noise_var/noise_ref.
+        Both terms are dimensionless and equal 1.0 at the Ramsey reference,
+        giving a total of 2.0 at Ramsey.  Any improvement in sensitivity OR
+        noise reduces the objective below 2.  The two terms are on the same
+        scale by construction.
+    """
     if sens_sq <= 0.0 or not np.isfinite(sens_sq):
         return 1e10
     if noise_var < 0.0 or not np.isfinite(noise_var):
@@ -218,9 +242,41 @@ def _objective_from_metrics(
         score = sens_sq / sens_scale - objective_weight * noise_var / noise_scale
         return -float(score)
 
+    if objective_mode == 'inv_sens_plus_noise':
+        return 1.0 / sens_sq + noise_var / sens_sq ** 2
+
+    if objective_mode == 'inv_sens_plus_ramsey_noise':
+        return 1.0 / sens_sq + noise_var / max(noise_ref, 1e-15)
+
+    if objective_mode == 'ramsey_normalized':
+        return max(sens_ref, 1e-15) / sens_sq + noise_var / max(noise_ref, 1e-15)
+
     raise ValueError(
-        f"objective_mode must be 'sigma_nu' or 'normalized_difference'; got {objective_mode!r}"
+        f"objective_mode must be 'sigma_nu', 'normalized_difference', "
+        f"'inv_sens_plus_noise', 'inv_sens_plus_ramsey_noise', or "
+        f"'ramsey_normalized'; got {objective_mode!r}"
     )
+
+
+def _report_score(
+    objective_mode: str,
+    sens_sq: float,
+    noise_var: float,
+    sigma_nu: float,
+    sens_ref: float,
+    noise_ref: float,
+    objective_weight: float,
+) -> float:
+    """Return the objective score for the result dataclass.
+
+    For minimisation modes ('sigma_nu', 'inv_sens_plus_noise') this equals
+    the raw objective value (lower is better).
+    For 'normalized_difference' the stored score is negated so that higher
+    is still better for human inspection.
+    """
+    raw = _objective_from_metrics(
+        sens_sq, noise_var, objective_mode, sens_ref, noise_ref, objective_weight)
+    return -raw if objective_mode == 'normalized_difference' else raw
 
 
 # =============================================================================
@@ -646,13 +702,9 @@ def optimize_qsp_sequence(
         sens_sq, noise_var, sigma_nu = evaluate_sequence(
             seq_opt, S_func, m_y=m_y, M=M, psi0=psi0,
             n_fft=n_fft, pad_factor=pad_factor, omega_cutoff=omega_cutoff)
-    objective_score = (
-        -_objective_from_metrics(
-            sens_sq, noise_var, objective_mode,
-            sens_ref, noise_ref, objective_weight)
-        if objective_mode == 'normalized_difference'
-        else sigma_nu
-    )
+    objective_score = _report_score(
+        objective_mode, sens_sq, noise_var, sigma_nu,
+        sens_ref, noise_ref, objective_weight)
 
     return QSPOptimizationResult(
         n=n,
@@ -681,6 +733,7 @@ def optimize_equiangular_sequence(
     noise_psd: Union[str, Callable] = 'white',
     omega_max: Optional[float] = None,
     omega_fixed: Optional[float] = None,
+    ramsey_omega_fast: float = 20.0 * np.pi,
     m_y: float = 1.0,
     M=None,
     psi0=None,
@@ -722,6 +775,11 @@ def optimize_equiangular_sequence(
         If provided, fix Omega to this value and optimise phases only.
         Useful for isolating the effect of phase modulation vs GPS at the
         same Rabi frequency.
+    ramsey_omega_fast : float
+        Rabi frequency used to build the Ramsey reference sequence for sens_ref
+        and noise_ref.  Default: 20*pi (the standard fast-pulse Ramsey used by
+        the QSP optimiser).  Using a consistent value across all optimisers
+        ensures fair comparison under FOMs that depend on noise_ref.
     m_y : float
         Measurement weight m_y for Fe computation (default 1.0).
     M : np.ndarray, optional
@@ -779,7 +837,7 @@ def optimize_equiangular_sequence(
     if use_analytic:
         _ana_freqs = np.linspace(_omega_lo, omega_max_analytic, n_omega)
 
-    ref_seq = build_ramsey_3level(system, T, max(omega_fixed or (N * np.pi / T), np.pi / T))
+    ref_seq = build_ramsey_3level(system, T, ramsey_omega_fast)
     if use_analytic:
         sens_ref, noise_ref, sigma_ref = analytic_evaluate_sequence(
             ref_seq, S_func, m_y=m_y, M=M, psi0=psi0,
@@ -875,13 +933,9 @@ def optimize_equiangular_sequence(
             sensitivity_sq=sens_sq,
             noise_var=noise_var,
             sigma_nu=sigma_nu,
-            objective_score=(
-                -_objective_from_metrics(
-                    sens_sq, noise_var, objective_mode,
-                    sens_ref, noise_ref, objective_weight)
-                if objective_mode == 'normalized_difference'
-                else sigma_nu
-            ),
+            objective_score=_report_score(
+                objective_mode, sens_sq, noise_var, sigma_nu,
+                sens_ref, noise_ref, objective_weight),
             objective_mode=objective_mode,
             noise_label=noise_label,
             seq=seq_opt,
@@ -965,13 +1019,9 @@ def optimize_equiangular_sequence(
         sensitivity_sq=sens_sq,
         noise_var=noise_var,
         sigma_nu=sigma_nu,
-        objective_score=(
-            -_objective_from_metrics(
-                sens_sq, noise_var, objective_mode,
-                sens_ref, noise_ref, objective_weight)
-            if objective_mode == 'normalized_difference'
-            else sigma_nu
-        ),
+        objective_score=_report_score(
+            objective_mode, sens_sq, noise_var, sigma_nu,
+            sens_ref, noise_ref, objective_weight),
         objective_mode=objective_mode,
         noise_label=noise_label,
         seq=seq_opt,

@@ -17,6 +17,20 @@ Non-negativity Omega(t)>=0 is penalised in the objective.
 All sequences are discretised into N_DISC constant-Omega segments.
 Filter function: fft_three_level_filter (handles delta in each segment).
 Sensitivity:     detuning_sensitivity(seq)  [delta baked into segments].
+
+Objective (FOM)
+---------------
+  minimize  1/sens_sq + noise_var / noise_var_ramsey
+
+where noise_var_ramsey is the Ramsey noise variance for the same noise PSD.
+The objective_mode label 'inv_sens_plus_ramsey_noise' is stored in the cache
+so results from different FOM choices can be identified.
+
+Noise types optimised
+---------------------
+  white     : S(w) = 1
+  1/f       : S(w) = 1/|w|
+  high-pass : S(w) = theta(|w| - 2)   (omega_c = 2 rad/s)
 """
 
 import sys, time
@@ -26,7 +40,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.integrate import simpson
-from scipy.optimize import differential_evolution, minimize
+from scipy.optimize import differential_evolution, minimize, minimize_scalar
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -34,10 +48,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from quantum_pulse_suite.systems import ThreeLevelClock
 from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
 from quantum_pulse_suite.core.three_level_filter import (
-    fft_three_level_filter, detuning_sensitivity, analytic_filter,
+    fft_three_level_filter, detuning_sensitivity,
     default_omega_cutoff,
 )
-from quantum_pulse_suite.analysis.pulse_optimizer import white_noise_psd, one_over_f_psd
+from quantum_pulse_suite.analysis.pulse_optimizer import (
+    white_noise_psd, one_over_f_psd, high_pass_psd,
+)
 
 # =============================================================================
 # Global config
@@ -49,17 +65,33 @@ N_DISC     = 64          # segments for shaped sequence (optimisation)
 N_DISC_FIN = 256         # segments for final evaluation
 N_FFT      = 1024        # fft samples during optimisation
 N_FFT_FIN  = 4096        # fft samples for final evaluation
-PAD        = 4           # must match final evaluation to avoid bias
+PAD        = 4
 FREQS_PLOT = np.logspace(-1.5, np.log10(30), 600)
 N_FREE     = 4           # free Fourier coefficients b_2..b_{N_FREE+1}
 OMEGA_CUTOFF = default_omega_cutoff(T)
 
+OBJECTIVE_MODE = 'ramsey_normalized'
+
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
-CACHE_DIR  = OUTPUT_DIR / 'cache'   # timestamped runs stored here
+CACHE_DIR  = OUTPUT_DIR / 'cache'
+
+# Noise PSD specs: (cache_key, display_label, S_func)
+NOISE_SPECS = [
+    ('white', 'White',              white_noise_psd()),
+    ('1f',    '1/f',               one_over_f_psd()),
+    ('hp2',   'High-pass (wc=2)',  high_pass_psd(omega_c=2.0)),
+]
+
+# Deterministic per-noise seed offsets
+_NOISE_SEED_OFFSET = {'white': 0, '1f': 7, 'hp2': 13}
 
 
-def _latest_cache(required_key='m1_Opt0_sigma_nu_w'):
-    """Return path to most recent cache file that contains required_key, or None."""
+# =============================================================================
+# Cache helpers
+# =============================================================================
+
+def _latest_cache(required_key='objective_mode'):
+    """Return path to the most recent cache containing required_key, or None."""
     if not CACHE_DIR.exists():
         return None
     candidates = sorted(CACHE_DIR.glob('shaped_gps_opt_cache_*.npz'), reverse=True)
@@ -74,16 +106,13 @@ def _latest_cache(required_key='m1_Opt0_sigma_nu_w'):
 
 
 def _save_cache(data: dict):
-    """Save data to a timestamped cache file in CACHE_DIR."""
+    """Save data dict to a timestamped npz in CACHE_DIR."""
     from datetime import datetime
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     ts   = datetime.now().strftime('%Y%m%d_%H%M%S')
     path = CACHE_DIR / f'shaped_gps_opt_cache_{ts}.npz'
     np.savez(str(path), **data)
     return path
-
-S_white    = white_noise_psd()
-S_1_over_f = one_over_f_psd()
 
 
 # =============================================================================
@@ -103,10 +132,10 @@ def envelope_blackman(ts, T_total, omega_mean):
                                 + a2 * np.cos(4.0 * np.pi * ts / T_total))
 
 def make_cosine_envelope(b_free):
-    """Return an envelope fn from free coefficients b_2..b_{N+1}."""
-    b1     = 1.0 - float(np.sum(b_free))
-    b_all  = np.concatenate([[b1], np.asarray(b_free)])   # shape (N_FREE+1,)
-    ks     = np.arange(1, len(b_all) + 1)                 # 1..N_FREE+1
+    """Return an envelope callable from free coefficients b_2..b_{N_FREE+1}."""
+    b1    = 1.0 - float(np.sum(b_free))
+    b_all = np.concatenate([[b1], np.asarray(b_free)])
+    ks    = np.arange(1, len(b_all) + 1)
 
     def fn(ts, T_total, omega_mean):
         phases = 2.0 * np.pi * np.outer(ks, ts) / T_total  # (N, n_pts)
@@ -115,7 +144,7 @@ def make_cosine_envelope(b_free):
 
 
 # =============================================================================
-# Sequence builder (delta baked in)
+# Sequence builder
 # =============================================================================
 
 def build_seq(system, omega_mean, envelope_fn, delta, n_disc=N_DISC):
@@ -141,25 +170,29 @@ def build_ramsey(system):
 
 
 # =============================================================================
-# sigma_nu evaluator
+# FOM and negativity penalty
 # =============================================================================
 
-def compute_sigma_nu(seq, n_fft=N_FFT, pad=PAD):
+def compute_fom(seq, S_func, sens_ref_ramsey, noise_ref_ramsey, n_fft=N_FFT, pad=PAD):
+    """Return (fom, sens_sq, noise_var, (freqs, Fe)).
+
+    fom = sens_ref_ramsey/sens_sq + noise_var/noise_ref_ramsey   [ramsey_normalized]
+    Both terms equal 1.0 at Ramsey, total = 2.0 at Ramsey.
+    """
     _, sens_sq = detuning_sensitivity(seq)
     if sens_sq < 1e-20:
-        return np.inf, 0.0, 0.0, None
-    freqs, Fe, _, _ = fft_three_level_filter(seq, n_samples=n_fft,
-                                              pad_factor=pad, m_y=1.0)
+        return 1e10, 0.0, 0.0, None
+    freqs, Fe, _, _ = fft_three_level_filter(seq, n_samples=n_fft, pad_factor=pad, m_y=1.0)
     mask = freqs >= OMEGA_CUTOFF
     if np.count_nonzero(mask) < 2:
-        return np.inf, sens_sq, 0.0, (freqs, Fe)
-    noise_w = float(simpson(Fe[mask] * S_white(freqs[mask]), x=freqs[mask]) / (2*np.pi))
-    sigma_nu_w = noise_w / sens_sq if noise_w > 0 else np.inf
-    return sigma_nu_w, sens_sq, noise_w, (freqs, Fe)
+        return 1e10, sens_sq, 0.0, (freqs, Fe)
+    noise_var = float(simpson(Fe[mask] * S_func(freqs[mask]), x=freqs[mask]) / (2 * np.pi))
+    fom = max(sens_ref_ramsey, 1e-15) / sens_sq + noise_var / max(noise_ref_ramsey, 1e-15)
+    return fom, sens_sq, noise_var, (freqs, Fe)
 
 
 def negativity_penalty(envelope_fn, omega_mean, n_check=256):
-    """Penalty proportional to integral of negative part of Omega(t)."""
+    """Penalty proportional to the integral of negative Omega(t)."""
     ts  = (np.arange(n_check) + 0.5) * T / n_check
     om  = envelope_fn(ts, T, omega_mean)
     neg = np.minimum(om, 0.0)
@@ -167,39 +200,38 @@ def negativity_penalty(envelope_fn, omega_mean, n_check=256):
 
 
 # =============================================================================
-# Step 1: optimise delta for a fixed envelope shape
+# Step 1: optimise delta for a fixed envelope (per noise type)
 # =============================================================================
 
 def optimise_delta(system, omega_mean, envelope_fn, delta_max,
+                   S_func, sens_ref_ramsey, noise_ref_ramsey,
                    n_scan=60, label=''):
-    """Scan then polish to find best delta for a fixed shape."""
+    """Scan then polish to find the best delta for a fixed envelope shape."""
     deltas = np.linspace(-delta_max, delta_max, n_scan)
     best_fom, best_d = np.inf, 0.0
 
     for d in deltas:
         pen = negativity_penalty(envelope_fn, omega_mean)
-        if pen > 1e-3:      # skip obviously bad shapes during scan
+        if pen > 1e-3:
             continue
         seq = build_seq(system, omega_mean, envelope_fn, d)
-        sigma_nu, _, _, _ = compute_sigma_nu(seq)
-        if sigma_nu < best_fom:
-            best_fom, best_d = sigma_nu, d
+        fom, _, _, _ = compute_fom(seq, S_func, sens_ref_ramsey, noise_ref_ramsey)
+        if fom < best_fom:
+            best_fom, best_d = fom, d
 
-    # Polish with scalar minimizer
-    def sigma_nu_obj(d):
+    def fom_obj(d):
         seq = build_seq(system, omega_mean, envelope_fn, float(d))
-        sigma_nu, _, _, _ = compute_sigma_nu(seq)
-        return sigma_nu
+        fom, _, _, _ = compute_fom(seq, S_func, sens_ref_ramsey, noise_ref_ramsey)
+        return fom
 
-    from scipy.optimize import minimize_scalar
-    res = minimize_scalar(sigma_nu_obj,
-                          bounds=(best_d - delta_max/5, best_d + delta_max/5),
+    res = minimize_scalar(fom_obj,
+                          bounds=(best_d - delta_max / 5, best_d + delta_max / 5),
                           method='bounded',
                           options={'xatol': 1e-4})
     best_d   = float(res.x)
     best_fom = float(res.fun)
     if label:
-        print(f'    {label}: delta*={best_d:.4f}  sigma_nu={best_fom:.4f}')
+        print(f'    {label}: delta*={best_d:.4f}  fom={best_fom:.4f}')
     return best_d, best_fom
 
 
@@ -207,12 +239,9 @@ def optimise_delta(system, omega_mean, envelope_fn, delta_max,
 # Step 2: optimise envelope (Fourier coefficients) + delta jointly
 # =============================================================================
 
-def optimise_envelope(system, omega_mean, delta_max, seed=42, label='',
-                      popsize=12, maxiter=250, n_restarts=3):
-    """
-    Joint optimisation over free Fourier coefficients b_2..b_{N_FREE+1}
-    and operating detuning delta.
-    """
+def optimise_envelope(system, omega_mean, delta_max, S_func, sens_ref_ramsey, noise_ref_ramsey,
+                      seed=42, label='', popsize=12, maxiter=250, n_restarts=3):
+    """Joint optimisation over free Fourier coefficients b_2..b_{N_FREE+1} and delta."""
     b_bounds = [(-1.5, 1.5)] * N_FREE
     d_bound  = [(-delta_max, delta_max)]
     bounds   = b_bounds + d_bound
@@ -221,11 +250,10 @@ def optimise_envelope(system, omega_mean, delta_max, seed=42, label='',
         b_free = x[:N_FREE]
         delta  = float(x[N_FREE])
         fn     = make_cosine_envelope(b_free)
-        # Penalise negative envelope
-        pen = negativity_penalty(fn, omega_mean) * 1e4
-        seq = build_seq(system, omega_mean, fn, delta)
-        sigma_nu, _, _, _ = compute_sigma_nu(seq)
-        return sigma_nu + pen
+        pen    = negativity_penalty(fn, omega_mean) * 1e4
+        seq    = build_seq(system, omega_mean, fn, delta)
+        fom, _, _, _ = compute_fom(seq, S_func, sens_ref_ramsey, noise_ref_ramsey)
+        return fom + pen
 
     rng = np.random.default_rng(seed)
     de  = differential_evolution(
@@ -243,35 +271,32 @@ def optimise_envelope(system, omega_mean, delta_max, seed=42, label='',
         if r.success and r.fun < best_val:
             best_val, best_x = r.fun, r.x.copy()
 
-    b_opt   = best_x[:N_FREE]
-    d_opt   = float(best_x[N_FREE])
-    fn_opt  = make_cosine_envelope(b_opt)
-    sigma_nu_opt = best_val
-    b1_opt  = 1.0 - float(np.sum(b_opt))
+    b_opt  = best_x[:N_FREE]
+    d_opt  = float(best_x[N_FREE])
+    fn_opt = make_cosine_envelope(b_opt)
+    b1_opt = 1.0 - float(np.sum(b_opt))
     if label:
         b_all = np.concatenate([[b1_opt], b_opt])
-        print(f'    {label}: delta*={d_opt:.4f}  sigma_nu={sigma_nu_opt:.4f}')
+        print(f'    {label}: delta*={d_opt:.4f}  fom={best_val:.4f}')
         print(f'      b = [{", ".join(f"{v:.4f}" for v in b_all)}]')
-    return d_opt, sigma_nu_opt, fn_opt, b_opt
+    return d_opt, best_val, fn_opt, b_opt
 
 
 # =============================================================================
 # Step 2b: optimise envelope at delta=0 fixed
 # =============================================================================
 
-def optimise_envelope_delta0(system, omega_mean, seed=42, label='',
-                              popsize=12, maxiter=250, n_restarts=3):
-    """
-    Optimise free Fourier coefficients b_2..b_{N_FREE+1} with delta fixed at 0.
-    """
+def optimise_envelope_delta0(system, omega_mean, S_func, sens_ref_ramsey, noise_ref_ramsey,
+                              seed=42, label='', popsize=12, maxiter=250, n_restarts=3):
+    """Optimise free Fourier coefficients b_2..b_{N_FREE+1} with delta fixed at 0."""
     bounds = [(-1.5, 1.5)] * N_FREE
 
     def objective(b_free):
         fn  = make_cosine_envelope(b_free)
         pen = negativity_penalty(fn, omega_mean) * 1e4
         seq = build_seq(system, omega_mean, fn, 0.0)
-        sigma_nu, _, _, _ = compute_sigma_nu(seq)
-        return sigma_nu + pen
+        fom, _, _, _ = compute_fom(seq, S_func, sens_ref_ramsey, noise_ref_ramsey)
+        return fom + pen
 
     rng = np.random.default_rng(seed)
     de  = differential_evolution(
@@ -294,33 +319,45 @@ def optimise_envelope_delta0(system, omega_mean, seed=42, label='',
     b1_opt = 1.0 - float(np.sum(b_opt))
     if label:
         b_all = np.concatenate([[b1_opt], b_opt])
-        print(f'    {label}: sigma_nu={best_val:.4f}  (delta=0 fixed)')
+        print(f'    {label}: fom={best_val:.4f}  (delta=0 fixed)')
         print(f'      b = [{", ".join(f"{v:.4f}" for v in b_all)}]')
-    return fn_opt, b_opt
+    return fn_opt, b_opt, best_val
 
 
 # =============================================================================
-# Final high-resolution evaluation + filter function
+# Final high-resolution evaluation (all noise types)
 # =============================================================================
 
 def final_eval(system, omega_mean, envelope_fn, delta, label=''):
+    """Evaluate a sequence at high resolution under all noise types."""
     seq = build_seq(system, omega_mean, envelope_fn, delta, n_disc=N_DISC_FIN)
     _, sens_sq = detuning_sensitivity(seq)
     freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
         seq, n_samples=N_FFT_FIN, pad_factor=4, m_y=1.0)
     mask = freqs_fft >= OMEGA_CUTOFF
-    kubo_w = float(simpson(Fe_fft[mask] * S_white(freqs_fft[mask]),    x=freqs_fft[mask]) / (2*np.pi))
-    kubo_f = float(simpson(Fe_fft[mask] * S_1_over_f(freqs_fft[mask]), x=freqs_fft[mask]) / (2*np.pi))
-    sigma_nu_w = kubo_w / sens_sq if kubo_w > 0 else np.inf
-    sigma_nu_f = kubo_f / sens_sq if kubo_f > 0 else np.inf
+
+    result = dict(sens_sq=sens_sq, delta=delta)
+    for nkey, _, S_func in NOISE_SPECS:
+        if np.count_nonzero(mask) < 2:
+            noise_var = 0.0
+        else:
+            noise_var = float(simpson(Fe_fft[mask] * S_func(freqs_fft[mask]),
+                                      x=freqs_fft[mask]) / (2 * np.pi))
+        sigma_nu = noise_var / sens_sq if (sens_sq > 1e-20 and noise_var > 0) else np.inf
+        result[f'noise_var_{nkey}'] = noise_var
+        result[f'sigma_nu_{nkey}']  = sigma_nu
+
+    mask_plot = freqs_fft <= 35.0
+    result['freqs'] = freqs_fft[mask_plot]
+    result['Fe']    = Fe_fft[mask_plot]
+
     if label:
-        print(f'  {label:<42}  sens={sens_sq:.4f}  sigma_nu_w={sigma_nu_w:.4f}'
-              f'  sigma_nu_1/f={sigma_nu_f:.4f}  delta={delta:.4f}')
-    # Keep only frequencies up to plot range to avoid huge arrays
-    mask = freqs_fft <= 35.0
-    return dict(sens_sq=sens_sq, kubo_w=kubo_w, sigma_nu_w=sigma_nu_w,
-                sigma_nu_f=sigma_nu_f, delta=delta,
-                freqs=freqs_fft[mask], Fe=Fe_fft[mask])
+        parts = [f'  {label:<46}  sens={sens_sq:.4f}']
+        for nkey, _, _ in NOISE_SPECS:
+            parts.append(f'  snu_{nkey}={result[f"sigma_nu_{nkey}"]:.4f}')
+        parts.append(f'  d={delta:.4f}')
+        print(''.join(parts))
+    return result
 
 
 # =============================================================================
@@ -340,187 +377,259 @@ def main():
         ('Hann',     envelope_hann),
         ('Blackman', envelope_blackman),
     ]
-
-    results   = {}   # results[m][label]
-    opt_envs  = {}   # opt_envs[m]  = (fn_opt,  b_opt)   -- free delta
-    opt0_envs = {}   # opt0_envs[m] = (fn_opt0, b_opt0)  -- delta=0 fixed
-
-    # ── Load or compute ───────────────────────────────────────────────────────
-    # Keys needed in cache
     _all_names = [s for s, _ in fixed_shapes] + ['Opt', 'Opt0']
-    _cache_keys = ('sens_sq', 'kubo_w', 'sigma_nu_w', 'sigma_nu_f', 'delta', 'freqs', 'Fe')
 
-    _cache_path = _latest_cache(required_key='m1_Opt0_sigma_nu_w')
-    cache_ok    = _cache_path is not None
+    # cache key lists used for save/load
+    _nkeys = [nkey for nkey, _, _ in NOISE_SPECS]
+    _per_noise_suffixes = (
+        [f'noise_var_{k}' for k in _nkeys]
+        + [f'sigma_nu_{k}'  for k in _nkeys]
+    )
+    _shared_suffixes = ('sens_sq', 'delta', 'freqs', 'Fe')
+
+    # ── Try to load from cache ─────────────────────────────────────────────────
+    _cache_path = _latest_cache(required_key='objective_mode')
+    cache_ok    = False
+    if _cache_path is not None:
+        try:
+            cache = np.load(str(_cache_path), allow_pickle=True)
+            cached_mode = cache['objective_mode'].item()
+            if cached_mode == OBJECTIVE_MODE:
+                cache_ok = True
+                print(f'Loading cached results from {_cache_path} (mode={cached_mode})')
+            else:
+                print(f'Cache mode={cached_mode} != {OBJECTIVE_MODE}. Recomputing.')
+        except Exception as e:
+            print(f'Cache load failed ({e}). Recomputing.')
 
     if cache_ok:
-        print(f'Loading cached results from {_cache_path}')
-        cache = np.load(str(_cache_path), allow_pickle=True)
-        ramsey = {k: cache[f'ramsey_{k}'] for k in
-                  ('sens_sq', 'sigma_nu_w', 'freqs', 'Fe')}
-        ramsey = {k: float(v) if v.ndim == 0 else v for k, v in ramsey.items()}
-        for m_cyc, _, _ in gps_cases:
-            results[m_cyc] = {}
-            for name in _all_names:
-                key = f'm{m_cyc}_{name}'
-            results[m_cyc][name] = {
-                k: float(cache[f'{key}_{k}']) if cache[f'{key}_{k}'].ndim == 0
-                else cache[f'{key}_{k}']
-                for k in _cache_keys
-            }
-            b_opt  = cache[f'm{m_cyc}_opt_b']
-            b_opt0 = cache[f'm{m_cyc}_opt0_b']
-            opt_envs[m_cyc]  = (make_cosine_envelope(b_opt),  b_opt)
-            opt0_envs[m_cyc] = (make_cosine_envelope(b_opt0), b_opt0)
+        ramsey_sens_sq = float(cache['ramsey_sens_sq'])
+        ramsey_freqs   = cache['ramsey_freqs']
+        ramsey_Fe      = cache['ramsey_Fe']
+        ramsey_refs    = {nkey: float(cache[f'ramsey_{nkey}_noise_var']) for nkey in _nkeys}
+
+        results    = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
+        opt_params = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
+        for m, _, _ in gps_cases:
+            for nkey in _nkeys:
+                for name in _all_names:
+                    key = f'm{m}_{nkey}_{name}'
+                    r = {}
+                    for k in _shared_suffixes:
+                        v = cache[f'{key}_{k}']
+                        r[k] = float(v) if v.ndim == 0 else v
+                    for k in _per_noise_suffixes:
+                        r[k] = float(cache[f'{key}_{k}'])
+                    results[m][nkey][name] = r
+                opt_params[m][nkey]['opt_b']    = cache[f'm{m}_{nkey}_opt_b']
+                opt_params[m][nkey]['opt_delta'] = float(cache[f'm{m}_{nkey}_opt_delta'])
+                opt_params[m][nkey]['opt0_b']    = cache[f'm{m}_{nkey}_opt0_b']
         print('  Done.')
+
     else:
-        # ── Step 0: Ramsey baseline ───────────────────────────────────────────
-        print('Ramsey baseline ...')
+        # ── Ramsey baseline ───────────────────────────────────────────────────
+        print('Computing Ramsey baseline ...')
         seq_r = build_ramsey(system)
-        _, sens_r = detuning_sensitivity(seq_r)
-        freqs_r, Fe_r_fft, _, _ = fft_three_level_filter(
+        _, ramsey_sens_sq = detuning_sensitivity(seq_r)
+        freqs_r, Fe_r, _, _ = fft_three_level_filter(
             seq_r, n_samples=N_FFT_FIN, pad_factor=4, m_y=1.0)
         mask_r = freqs_r >= OMEGA_CUTOFF
-        kubo_r = float(simpson(Fe_r_fft[mask_r] * S_white(freqs_r[mask_r]), x=freqs_r[mask_r]) / (2*np.pi))
-        mask_r = freqs_r <= 35.0
-        ramsey = dict(sens_sq=sens_r, sigma_nu_w=kubo_r/sens_r,
-                      freqs=freqs_r[mask_r], Fe=Fe_r_fft[mask_r])
-        print(f'  Ramsey: sigma_nu_w={ramsey["sigma_nu_w"]:.4f}')
 
-        for m_cyc, omega_mean, delta_max in gps_cases:
-            results[m_cyc] = {}
-            print(f'\n=== GPS m={m_cyc}  (Omega_mean={omega_mean:.4f}) ===')
+        ramsey_refs = {}
+        for nkey, nlabel, S_func in NOISE_SPECS:
+            nv = float(simpson(Fe_r[mask_r] * S_func(freqs_r[mask_r]),
+                               x=freqs_r[mask_r]) / (2 * np.pi))
+            ramsey_refs[nkey] = nv
+            sigma_r = nv / ramsey_sens_sq if (nv > 0 and ramsey_sens_sq > 1e-20) else np.inf
+            print(f'  Ramsey [{nlabel}]: sens_sq={ramsey_sens_sq:.4f}  '
+                  f'noise_var={nv:.4e}  sigma_nu={sigma_r:.4f}')
+        mask_r_plot = freqs_r <= 35.0
+        ramsey_freqs = freqs_r[mask_r_plot]
+        ramsey_Fe    = Fe_r[mask_r_plot]
 
-            # ── Step 1: optimise delta for each fixed shape ───────────────────
-            print('\n  Step 1 – optimise delta for fixed shapes:')
-            for name, fn in fixed_shapes:
-                d_opt, _ = optimise_delta(
-                    system, omega_mean, fn, delta_max,
-                    label=f'{name} m={m_cyc}')
-                results[m_cyc][name] = final_eval(
-                    system, omega_mean, fn, d_opt,
-                    label=f'GPS m={m_cyc}  {name} (delta_opt)')
+        results    = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
+        opt_params = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
 
-            # ── Step 2: optimise envelope + delta ─────────────────────────────
-            print('\n  Step 2 – optimise envelope shape + delta:')
-            t0 = time.time()
-            d_opt, _, fn_opt, b_opt = optimise_envelope(
-                system, omega_mean, delta_max,
-                seed=17 + m_cyc, label=f'Opt-envelope m={m_cyc}',
-                popsize=12, maxiter=250, n_restarts=4)
-            print(f'    (optimisation took {time.time()-t0:.1f}s)')
-            opt_envs[m_cyc] = (fn_opt, b_opt)
-            results[m_cyc]['Opt'] = final_eval(
-                system, omega_mean, fn_opt, d_opt,
-                label=f'GPS m={m_cyc}  Opt-envelope (delta_opt)')
+        # ── Optimization loop: per noise type, per m, per shape ───────────────
+        for nkey, nlabel, S_func in NOISE_SPECS:
+            noise_ref = ramsey_refs[nkey]
+            print(f'\n{"="*60}')
+            print(f'Noise: {nlabel}  (noise_ref_ramsey={noise_ref:.4e})')
+            print(f'{"="*60}')
 
-            # ── Step 2b: optimise envelope at delta=0 fixed ───────────────────
-            print('\n  Step 2b – optimise envelope at delta=0:')
-            t0 = time.time()
-            fn_opt0, b_opt0 = optimise_envelope_delta0(
-                system, omega_mean,
-                seed=31 + m_cyc, label=f'Opt0-envelope m={m_cyc}',
-                popsize=12, maxiter=250, n_restarts=4)
-            print(f'    (optimisation took {time.time()-t0:.1f}s)')
-            opt0_envs[m_cyc] = (fn_opt0, b_opt0)
-            results[m_cyc]['Opt0'] = final_eval(
-                system, omega_mean, fn_opt0, 0.0,
-                label=f'GPS m={m_cyc}  Opt0-envelope (delta=0)')
+            for m_cyc, omega_mean, delta_max in gps_cases:
+                print(f'\n--- GPS m={m_cyc}  (Omega_mean={omega_mean:.4f}) ---')
+                seed_base = 17 + m_cyc + _NOISE_SEED_OFFSET[nkey]
+
+                # Step 1: fixed shapes
+                print('  Step 1 – fixed shapes, optimise delta:')
+                for name, fn in fixed_shapes:
+                    d_opt, _ = optimise_delta(
+                        system, omega_mean, fn, delta_max,
+                        S_func, ramsey_sens_sq, noise_ref,
+                        label=f'{name} m={m_cyc} [{nlabel}]')
+                    results[m_cyc][nkey][name] = final_eval(
+                        system, omega_mean, fn, d_opt,
+                        label=f'GPS m={m_cyc}  {name} [{nlabel}]')
+
+                # Step 2: optimise envelope + delta
+                print('  Step 2 – optimise envelope + delta:')
+                t0 = time.time()
+                d_opt, _, fn_opt, b_opt = optimise_envelope(
+                    system, omega_mean, delta_max, S_func, ramsey_sens_sq, noise_ref,
+                    seed=seed_base,
+                    label=f'Opt m={m_cyc} [{nlabel}]',
+                    popsize=12, maxiter=250, n_restarts=4)
+                print(f'    (took {time.time()-t0:.1f}s)')
+                opt_params[m_cyc][nkey]['opt_b']    = b_opt
+                opt_params[m_cyc][nkey]['opt_delta'] = d_opt
+                results[m_cyc][nkey]['Opt'] = final_eval(
+                    system, omega_mean, fn_opt, d_opt,
+                    label=f'GPS m={m_cyc}  Opt [{nlabel}]')
+
+                # Step 2b: optimise envelope at delta=0
+                print('  Step 2b – optimise envelope at delta=0:')
+                t0 = time.time()
+                fn_opt0, b_opt0, _ = optimise_envelope_delta0(
+                    system, omega_mean, S_func, ramsey_sens_sq, noise_ref,
+                    seed=seed_base + 14,
+                    label=f'Opt0 m={m_cyc} [{nlabel}]',
+                    popsize=12, maxiter=250, n_restarts=4)
+                print(f'    (took {time.time()-t0:.1f}s)')
+                opt_params[m_cyc][nkey]['opt0_b'] = b_opt0
+                results[m_cyc][nkey]['Opt0'] = final_eval(
+                    system, omega_mean, fn_opt0, 0.0,
+                    label=f'GPS m={m_cyc}  Opt0 [{nlabel}]')
 
         # ── Save cache ────────────────────────────────────────────────────────
-        d = {}
-        for k, v in ramsey.items():
-            d[f'ramsey_{k}'] = np.array(v)
+        d = {
+            'objective_mode':  np.array(OBJECTIVE_MODE),
+            'ramsey_sens_sq':  np.array(ramsey_sens_sq),
+            'ramsey_freqs':    ramsey_freqs,
+            'ramsey_Fe':       ramsey_Fe,
+        }
+        for nkey in _nkeys:
+            d[f'ramsey_{nkey}_noise_var'] = np.array(ramsey_refs[nkey])
         for m_cyc, _, _ in gps_cases:
-            for name in _all_names:
-                key = f'm{m_cyc}_{name}'
-                for k, v in results[m_cyc][name].items():
-                    d[f'{key}_{k}'] = np.array(v)
-            d[f'm{m_cyc}_opt_b']  = opt_envs[m_cyc][1]
-            d[f'm{m_cyc}_opt0_b'] = opt0_envs[m_cyc][1]
+            for nkey in _nkeys:
+                for name in _all_names:
+                    key = f'm{m_cyc}_{nkey}_{name}'
+                    r   = results[m_cyc][nkey][name]
+                    for k in _shared_suffixes:
+                        d[f'{key}_{k}'] = np.array(r[k])
+                    for k in _per_noise_suffixes:
+                        d[f'{key}_{k}'] = np.array(r[k])
+                d[f'm{m_cyc}_{nkey}_opt_b']    = opt_params[m_cyc][nkey]['opt_b']
+                d[f'm{m_cyc}_{nkey}_opt_delta'] = np.array(opt_params[m_cyc][nkey]['opt_delta'])
+                d[f'm{m_cyc}_{nkey}_opt0_b']   = opt_params[m_cyc][nkey]['opt0_b']
         saved = _save_cache(d)
         print(f'\nCache saved to {saved}')
 
-    # ── Summary ───────────────────────────────────────────────────────────────
-    print('\n\n=== Summary ===')
-    hdr = f'{"Protocol":<44} {"sigma_nu_w":>12} {"sigma_nu_1/f":>14} {"delta":>8}'
-    print(hdr);  print('-'*len(hdr))
-    print(f'  {"Ramsey":<42} {ramsey["sigma_nu_w"]:>12.4f}')
+    # ── Summary table ─────────────────────────────────────────────────────────
+    print('\n\n=== Summary (sigma_nu per noise type) ===')
+    col_w = 16
+    hdr = f'{"Protocol":<48}' + ''.join(f'{nlbl:>{col_w}}' for _, nlbl, _ in NOISE_SPECS)
+    print(hdr);  print('-' * len(hdr))
+
+    ramsey_row = f'  {"Ramsey":<46}'
+    for nkey in _nkeys:
+        nv  = ramsey_refs[nkey]
+        sig = nv / ramsey_sens_sq if (nv > 0 and ramsey_sens_sq > 1e-20) else np.inf
+        ramsey_row += f'{sig:>{col_w}.4f}'
+    print(ramsey_row)
+
     for m_cyc, _, _ in gps_cases:
         for name in _all_names:
-            r   = results[m_cyc][name]
-            lbl = f'GPS m={m_cyc}  {name}'
-            print(f'  {lbl:<42} {r["sigma_nu_w"]:>12.4f} {r["sigma_nu_f"]:>14.4f}'
-                  f' {r["delta"]:>8.4f}')
+            # Show white-noise optimal result's sigma_nu across all noise types
+            r   = results[m_cyc]['white'][name]
+            lbl = f'GPS m={m_cyc}  {name} [white-opt]'
+            row = f'  {lbl:<46}'
+            for nkey in _nkeys:
+                row += f'{r[f"sigma_nu_{nkey}"]:>{col_w}.4f}'
+            print(row)
 
-    # ── Plot ──────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), sharey=True)
+    print('\n--- Per-noise-type optimal sequences ---')
+    for nkey, nlabel, _ in NOISE_SPECS:
+        print(f'\n  [{nlabel}]')
+        for m_cyc, _, _ in gps_cases:
+            for name in ['Opt', 'Opt0']:
+                r   = results[m_cyc][nkey][name]
+                lbl = f'GPS m={m_cyc}  {name}'
+                row = f'    {lbl:<44}'
+                for nk in _nkeys:
+                    row += f'{r[f"sigma_nu_{nk}"]:>{col_w}.4f}'
+                print(row + f'  delta={r["delta"]:.4f}')
 
-    color_map = {'Square': 'C0', 'Hann': 'C9', 'Blackman': 'C1',
-                 'Opt': 'C3', 'Opt0': 'C5'}
-    ls_map    = {'Square': '-',  'Hann': '--', 'Blackman': ':',
-                 'Opt': '-',  'Opt0': '-'}
-    lw_map    = {'Square': 1.8,  'Hann': 2.0, 'Blackman': 2.0,
-                 'Opt': 2.5,  'Opt0': 2.5}
+    # ── Filter function plots (one per noise type, showing that noise's optimum) ──
+    for nkey, nlabel, _ in NOISE_SPECS:
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), sharey=True)
 
-    for ax, (m_cyc, omega_mean, _) in zip(axes, gps_cases):
-        ax.loglog(ramsey['freqs'], ramsey['Fe'] / T**2 + 1e-20,
-                  color='0.55', lw=1.5, label='Ramsey (ref)')
+        color_map = {'Square': 'C0', 'Hann': 'C9', 'Blackman': 'C1',
+                     'Opt': 'C3', 'Opt0': 'C5'}
+        ls_map    = {'Square': '-',  'Hann': '--', 'Blackman': ':',
+                     'Opt': '-',  'Opt0': '-'}
+        lw_map    = {'Square': 1.8,  'Hann': 2.0, 'Blackman': 2.0,
+                     'Opt': 2.5,  'Opt0': 2.5}
 
-        for name in _all_names:
-            r   = results[m_cyc][name]
-            d_str = r'$\delta{=}0$' if name == 'Opt0' else rf'$\delta^*$={r["delta"]:.2f}'
-            lbl = rf'{name}  {d_str}  $\sigma_{{\nu,w}}$={r["sigma_nu_w"]:.3f}'
-            ax.loglog(r['freqs'], r['Fe'] / T**2 + 1e-20,
-                      color=color_map[name], lw=lw_map[name],
-                      ls=ls_map[name], label=lbl)
+        for ax, (m_cyc, omega_mean, _) in zip(axes, gps_cases):
+            ax.loglog(ramsey_freqs, ramsey_Fe / T**2 + 1e-20,
+                      color='0.55', lw=1.5, label='Ramsey (ref)')
 
-        # Inset: envelope shapes (Opt and Opt0 only — cleaner)
-        ax_ins = ax.inset_axes([0.62, 0.55, 0.36, 0.38])
-        ts = np.linspace(0, T, 300)
-        ax_ins.plot(ts / np.pi, envelope_square(ts, T, omega_mean) / omega_mean,
-                    color='C0', lw=1.2, ls='-', label='Square')
-        fn_opt,  _ = opt_envs[m_cyc]
-        fn_opt0, _ = opt0_envs[m_cyc]
-        ax_ins.plot(ts / np.pi, fn_opt(ts, T, omega_mean)  / omega_mean,
-                    color='C3', lw=2.0, ls='-', label='Opt')
-        ax_ins.plot(ts / np.pi, fn_opt0(ts, T, omega_mean) / omega_mean,
-                    color='C5', lw=2.0, ls='-', label=r'Opt$\delta{=}0$')
-        ax_ins.set_xlabel(r'$t/\pi$', fontsize=7)
-        ax_ins.set_ylabel(r'$\Omega/\bar\Omega$', fontsize=7)
-        ax_ins.tick_params(labelsize=6)
-        ax_ins.set_xlim(0, 2); ax_ins.set_ylim(bottom=0)
-        ax_ins.legend(fontsize=5.5, loc='upper center')
-        ax_ins.grid(True, alpha=0.3)
+            for name in _all_names:
+                r     = results[m_cyc][nkey][name]
+                sigma = r[f'sigma_nu_{nkey}']
+                d_str = r'$\delta{=}0$' if name == 'Opt0' else rf'$\delta^*$={r["delta"]:.2f}'
+                lbl   = rf'{name}  {d_str}  $\sigma_{{\nu}}$={sigma:.3f}'
+                ax.loglog(r['freqs'], r['Fe'] / T**2 + 1e-20,
+                          color=color_map[name], lw=lw_map[name],
+                          ls=ls_map[name], label=lbl)
 
-        # Rabi harmonics
-        for k in range(1, 6):
-            if omega_mean * k <= 30:
-                ax.axvline(omega_mean * k, color='0.7', lw=0.5, ls=':', alpha=0.5)
+            # Inset: envelope shapes (Opt and Opt0 for this noise type)
+            ax_ins = ax.inset_axes([0.62, 0.55, 0.36, 0.38])
+            ts = np.linspace(0, T, 300)
+            ax_ins.plot(ts / np.pi, envelope_square(ts, T, omega_mean) / omega_mean,
+                        color='C0', lw=1.2, ls='-', label='Square')
+            b_opt  = opt_params[m_cyc][nkey]['opt_b']
+            b_opt0 = opt_params[m_cyc][nkey]['opt0_b']
+            fn_opt  = make_cosine_envelope(b_opt)
+            fn_opt0 = make_cosine_envelope(b_opt0)
+            ax_ins.plot(ts / np.pi, fn_opt(ts, T, omega_mean)  / omega_mean,
+                        color='C3', lw=2.0, ls='-', label='Opt')
+            ax_ins.plot(ts / np.pi, fn_opt0(ts, T, omega_mean) / omega_mean,
+                        color='C5', lw=2.0, ls='-', label=r'Opt$\delta{=}0$')
+            ax_ins.set_xlabel(r'$t/\pi$', fontsize=7)
+            ax_ins.set_ylabel(r'$\Omega/\bar\Omega$', fontsize=7)
+            ax_ins.tick_params(labelsize=6)
+            ax_ins.set_xlim(0, 2);  ax_ins.set_ylim(bottom=0)
+            ax_ins.legend(fontsize=5.5, loc='upper center')
+            ax_ins.grid(True, alpha=0.3)
 
-        ax.set_xlim([FREQS_PLOT[0], 30])
-        ax.set_ylim([1e-9, 1.5])
-        ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=11)
-        ax.set_title(rf'GPS $m{{=}}{m_cyc}$  ($\bar\Omega={omega_mean:.1f}$)',
-                     fontsize=11)
-        ax.grid(True, alpha=0.3, which='both')
-        ax.legend(fontsize=7.5, loc='lower left')
+            for k in range(1, 6):
+                if omega_mean * k <= 30:
+                    ax.axvline(omega_mean * k, color='0.7', lw=0.5, ls=':', alpha=0.5)
 
-    axes[0].set_ylabel(r'$F_e(\omega)\,/\,T^2$', fontsize=11)
-    fig.suptitle(
-        r'Pulse-shaped GPS: filter functions at optimised $\delta$'
-        '\n'
-        r'Solid "Opt" = optimised Fourier envelope  '
-        r'($N_{\rm free}=' + str(N_FREE) + r'$ cosine terms + $\delta$)',
-        fontsize=10)
-    fig.tight_layout()
+            ax.set_xlim([FREQS_PLOT[0], 30]);  ax.set_ylim([1e-9, 1.5])
+            ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=11)
+            ax.set_title(rf'GPS $m{{=}}{m_cyc}$  ($\bar\Omega={omega_mean:.1f}$)',
+                         fontsize=11)
+            ax.grid(True, alpha=0.3, which='both')
+            ax.legend(fontsize=7.5, loc='lower left')
 
-    for ext in ['pdf', 'png']:
-        path = OUTPUT_DIR / f'shaped_gps_optimised.{ext}'
-        fig.savefig(path, dpi=300, bbox_inches='tight')
-        print(f'Saved: {path}')
+        axes[0].set_ylabel(r'$F_e(\omega)\,/\,T^2$', fontsize=11)
+        fig.suptitle(
+            rf'Pulse-shaped GPS: filter functions optimised for {nlabel} noise'
+            '\n'
+            r'FOM = $1/S^2 + \sigma^2_\nu/\sigma^2_{\nu,\rm Ramsey}$  '
+            r'($N_{\rm free}=' + str(N_FREE) + r'$ cosine terms)',
+            fontsize=10)
+        fig.tight_layout()
 
-    plt.close('all')
+        suffix = nkey.replace('/', 'f')
+        for ext in ['pdf', 'png']:
+            path = OUTPUT_DIR / f'shaped_gps_optimised_{suffix}.{ext}'
+            fig.savefig(path, dpi=300, bbox_inches='tight')
+            print(f'Saved: {path}')
+        plt.close(fig)
 
 
 if __name__ == '__main__':

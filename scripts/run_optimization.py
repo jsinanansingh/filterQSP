@@ -1,8 +1,5 @@
 """
-Run QSP optimizations and save results to cache alongside a cached equiangular reference.
-
-Run this script once (it takes several minutes).  After it completes,
-plot_qsp_comparison.py will load from the cache and generate plots instantly.
+Run QSP optimizations and save results to a timestamped cache.
 
 Usage:
     python scripts/run_optimization.py
@@ -11,82 +8,74 @@ Usage:
 import sys
 import numpy as np
 from pathlib import Path
+from datetime import datetime
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from quantum_pulse_suite.systems import ThreeLevelClock
-from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
 from quantum_pulse_suite.analysis.pulse_optimizer import (
     optimize_qsp_sequence,
-    PulseOptimizationResult,
-)
-
-# Import cache helpers from plot_qsp_comparison
-sys.path.insert(0, str(Path(__file__).parent))
-from plot_qsp_comparison import (
-    save_opt_cache,
     white_noise_psd, one_over_f_psd, high_pass_psd,
-    T, OMEGA_FAST, OMEGA_CUTOFF,
 )
-from plot_protocol_comparison import find_latest_equiangular_cache
 
-OBJECTIVE_MODE = 'normalized_difference'
-OBJECTIVE_WEIGHT = 1.0
+T            = 2 * np.pi
+OMEGA_FAST   = 20.0 * np.pi
+OMEGA_CUTOFF = 2 * np.pi / T
+CACHE_PREFIX = 'qsp_opt_cache'
+OUTPUT_DIR   = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 
-def load_cached_eq4(system):
-    """Load the white-noise N=4 equiangular result from the newest cache."""
-    cache_path = find_latest_equiangular_cache()
-    if cache_path is None:
-        raise FileNotFoundError(
-            'No equiangular cache found. Run scripts/run_equiangular_optimization.py first.'
-        )
-    c = np.load(str(cache_path), allow_pickle=True)
-    omega = float(c['eq_N4_white_omega'])
-    phases = np.asarray(c['eq_N4_white_phases'], dtype=float)
-    tau = T / len(phases)
-    seq = MultiLevelPulseSequence(system, system.probe)
-    for phi in phases:
-        seq.add_continuous_pulse(omega, [np.cos(phi), np.sin(phi), 0.0], 0.0, tau)
-    seq.compute_polynomials()
-    return PulseOptimizationResult(
-        omega=omega,
-        phases=phases,
-        sensitivity_sq=float(c['eq_N4_white_sens_sq']),
-        noise_var=float(c['eq_N4_white_noise_var']),
-        sigma_nu=float(c['eq_N4_white_sigma_nu']),
-        noise_label='white',
-        seq=seq,
-        objective_score=float(c['eq_N4_white_objective_score']) if 'eq_N4_white_objective_score' in c else float(c['eq_N4_white_sigma_nu']),
-        objective_mode=c['eq_N4_white_objective_mode'].item() if 'eq_N4_white_objective_mode' in c else 'sigma_nu',
-    ), cache_path
+OBJECTIVE_MODE   = 'ramsey_normalized'
+OBJECTIVE_WEIGHT = 1.0  # unused for inv_sens_plus_ramsey_noise
+
+NOISE_SPECS = [
+    ('White',            white_noise_psd()),
+    ('1/f',              one_over_f_psd()),
+    ('High-pass (w_c=2)', high_pass_psd(omega_c=2.0)),
+]
+
+QSP_NS      = [4, 8, 13]
+QSP_BUDGETS = {4: (10, 150, 4), 8: (10, 100, 3), 13: (8, 80, 2)}
+
+
+def _sanitize(label):
+    return label.replace('/', 'f').replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
+
+
+def save_qsp_cache(qsp_results):
+    """Save QSP optimization results to a timestamped npz cache."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    d = {'objective_mode': np.array(OBJECTIVE_MODE)}
+    for n, noise_dict in qsp_results.items():
+        for nlabel, r in noise_dict.items():
+            k = f'qsp_n{n}_{_sanitize(nlabel)}'
+            d[f'{k}_thetas']          = r.thetas
+            d[f'{k}_phis']            = r.phis
+            d[f'{k}_omega_fast']      = np.array(r.omega_fast)
+            d[f'{k}_tau_free']        = np.array(r.tau_free)
+            d[f'{k}_sensitivity_sq']  = np.array(r.sensitivity_sq)
+            d[f'{k}_noise_var']       = np.array(r.noise_var)
+            d[f'{k}_sigma_nu']        = np.array(r.sigma_nu)
+            d[f'{k}_objective_score'] = np.array(r.objective_score)
+            d[f'{k}_objective_mode']  = np.array(r.objective_mode)
+    ts   = datetime.now().strftime('%Y%m%d_%H%M%S')
+    path = OUTPUT_DIR / f'{CACHE_PREFIX}_{ts}.npz'
+    np.savez(str(path), **d)
+    return path
 
 
 def main():
-    system = ThreeLevelClock()
+    system       = ThreeLevelClock()
+    noise_labels = [lbl for lbl, _ in NOISE_SPECS]
+    S_funcs      = [S   for _,   S in NOISE_SPECS]
+    qsp_results  = {n: {} for n in QSP_NS}
 
-    S_w  = white_noise_psd()
-    S_f  = one_over_f_psd()
-    S_hp = high_pass_psd(omega_c=2.0)
-
-    noise_labels = ['White', '1/f', 'High-pass (w_c=2)']
-    S_funcs      = [S_w, S_f, S_hp]
-    qsp_ns       = [3, 5, 9]
-
-    # ── Equiangular N=4 from cache ────────────────────────────────────────────
-    res_eq4, eq_cache_path = load_cached_eq4(system)
-    print(f'Loaded equiangular N=4 from cache: {eq_cache_path}', flush=True)
-    print(f'  Omega*T={res_eq4.omega*T:.4f}  '
-          f'phases={np.array2string(res_eq4.phases, precision=4)}', flush=True)
-    print(f'  score={res_eq4.objective_score:.4f}  sigma_nu_white={res_eq4.sigma_nu:.4f}', flush=True)
-
-    # ── QSP sequences for each (n, noise) ────────────────────────────────────
-    _qsp_budgets = {3: (10, 150, 4), 5: (10, 120, 3), 9: (8, 80, 2)}
-    qsp_results  = {n: {} for n in qsp_ns}
-
+    print(f'Objective mode: {OBJECTIVE_MODE}', flush=True)
+    print(f'QSP n values:   {QSP_NS}', flush=True)
     print('\nOptimising QSP sequences ...', flush=True)
-    for n in qsp_ns:
-        pop, mit, nres = _qsp_budgets[n]
+
+    for n in QSP_NS:
+        pop, mit, nres = QSP_BUDGETS[n]
         for S_func, nlabel in zip(S_funcs, noise_labels):
             print(f'  QSP n={n}, {nlabel} ...', flush=True)
             r = optimize_qsp_sequence(
@@ -106,9 +95,8 @@ def main():
             print(f'    thetas={np.array2string(r.thetas, precision=4)}')
             print(f'    phis  ={np.array2string(r.phis,   precision=4)}', flush=True)
 
-    cache_path = save_opt_cache(res_eq4, qsp_results)
+    cache_path = save_qsp_cache(qsp_results)
     print(f'\nDone. Cache saved to: {cache_path}')
-    print('You can now run plot_qsp_comparison.py to generate plots instantly.')
 
 
 if __name__ == '__main__':
