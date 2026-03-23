@@ -41,21 +41,13 @@ OMEGA_FAST = 20 * np.pi   # fast pi/2 (and pi) pulses
 OMEGA_GPS1 = 2 * np.pi * 1 / T   # = 1.0 rad/s
 OMEGA_GPS8 = 2 * np.pi * 8 / T   # = 8.0 rad/s
 
-FREQS = np.logspace(-1.5, np.log10(30), 600)
+FREQS = np.logspace(-2, np.log10(30), 600)
 
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 
 # =============================================================================
 # Helpers
 # =============================================================================
-
-def find_latest_qsp_cache():
-    """Return path to most-recent qsp_opt_cache_*.npz (by timestamp suffix)."""
-    caches = sorted(OUTPUT_DIR.glob('qsp_opt_cache_*.npz'))
-    if not caches:
-        raise FileNotFoundError(f'No qsp_opt_cache_*.npz found in {OUTPUT_DIR}')
-    return caches[-1]
-
 
 def build_3level_ramsey(system):
     tau_pi2  = np.pi / (2 * OMEGA_FAST)
@@ -83,21 +75,17 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     system = ThreeLevelClock()
 
-    # ── Load double-pi QSP n=3 (white-noise optimum) from cache ──────────────
-    cache_path = find_latest_qsp_cache()
-    print(f'Loading QSP cache: {cache_path.name}')
-    cache = np.load(cache_path, allow_pickle=True)
-    thetas_dpi   = cache['qsp_n3_White_thetas']
-    phis_dpi     = cache['qsp_n3_White_phis']
-    sens_sq_dpi  = float(cache['qsp_n3_White_sensitivity_sq'])
-    print(f'  Double-pi QSP n=3: thetas={np.round(thetas_dpi,4)},  phis={np.round(phis_dpi,4)}')
-    print(f'  sens_sq = {sens_sq_dpi:.4f}  (T^2 = {T**2:.4f})')
+    # ── Double-pi QSP n=2: fixed reference, no cache needed ──────────────────
+    thetas_dpi = np.array([np.pi, np.pi])
+    phis_dpi   = np.array([0.0,   0.0])
+    print(f'Double-pi QSP n=2: thetas={thetas_dpi},  phis={phis_dpi}')
+    print(f'  Expected F_e(0) ~ T^2 = {T**2:.4f}')
 
     # ── Build 3-level sequences ───────────────────────────────────────────────
     s3_ramsey = build_3level_ramsey(system)
     s3_gps1   = build_3level_gps(system, OMEGA_GPS1)
     s3_gps8   = build_3level_gps(system, OMEGA_GPS8)
-    s3_dpi    = build_qsp_3level(system, T, n=3,
+    s3_dpi    = build_qsp_3level(system, T, n=2,
                                  thetas=thetas_dpi, phis=phis_dpi,
                                  omega_fast=OMEGA_FAST)
 
@@ -115,23 +103,40 @@ def main():
     print(f'3-level Ramsey  F_e~DC = {Fe3_ramsey[0]:.4f}  (T^2/4 = {T**2/4:.4f})')
     print(f'Double-pi QSP   F_e~DC = {Fe3_dpi[0]:.4f}')
 
+    # ── PRA-standard plot style ───────────────────────────────────────────────
+    matplotlib.rcParams.update({
+        'font.family':       'serif',
+        'font.size':          8,
+        'axes.labelsize':     9,
+        'axes.titlesize':     8,
+        'xtick.labelsize':    7,
+        'ytick.labelsize':    7,
+        'legend.fontsize':    7,
+        'legend.framealpha': 0.9,
+        'legend.edgecolor':  '0.7',
+        'lines.linewidth':    1.4,
+        'axes.linewidth':     0.6,
+        'xtick.major.width':  0.6,
+        'ytick.major.width':  0.6,
+        'xtick.minor.width':  0.4,
+        'ytick.minor.width':  0.4,
+        'xtick.direction':   'in',
+        'ytick.direction':   'in',
+    })
+
     # ── Plot ──────────────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    fig, ax = plt.subplots(figsize=(3.375, 2.8))
     eps = 1e-20
 
-    # 2-level Ramsey (dashed black)
-    ax.loglog(FREQS, Fe2_ramsey / T**2 + eps,  color='k',  lw=2.5, ls='--',
-              label=r'2-level Ramsey (analytic)')
+    # 3-level GPS m=1 (blue) and m=8 (green) — background
+    ax.loglog(FREQS, Fe3_gps1 / T**2 + eps,    color='C0', lw=1.6, ls='-',  zorder=2)
+    ax.loglog(FREQS, Fe3_gps8 / T**2 + eps,    color='C2', lw=1.6, ls='-',  zorder=2)
 
-    # 3-level Ramsey (red)
-    ax.loglog(FREQS, Fe3_ramsey / T**2 + eps,  color='C3', lw=2,   ls='-')
+    # 3-level Ramsey (red dashed) — foreground
+    ax.loglog(FREQS, Fe3_ramsey / T**2 + eps,  color='C3', lw=2.0, ls='--', zorder=4)
 
-    # 3-level GPS m=1 (blue) and m=8 (green)
-    ax.loglog(FREQS, Fe3_gps1 / T**2 + eps,    color='C0', lw=2,   ls='-')
-    ax.loglog(FREQS, Fe3_gps8 / T**2 + eps,    color='C2', lw=2,   ls='-')
-
-    # 3-level double-pi QSP n=3 (orange)
-    ax.loglog(FREQS, Fe3_dpi / T**2 + eps,     color='C1', lw=2,   ls='-')
+    # 2-level Ramsey = 3-level double-pi QSP (orange dashed) — foreground, single curve
+    ax.loglog(FREQS, Fe2_ramsey / T**2 + eps,  color='C1', lw=2.0, ls='--', zorder=5)
 
     # Harmonic markers
     for k in range(1, 10):
@@ -141,29 +146,25 @@ def main():
         if OMEGA_GPS8 * k <= 30:
             ax.axvline(OMEGA_GPS8 * k, color='C2', lw=0.5, ls=':', alpha=0.35)
 
-    ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=12)
-    ax.set_ylabel(r'$F_e(\omega)\,/\,T^2$', fontsize=12)
-    ax.set_title(
-        r'Filter functions: 2-level optimal Ramsey ($H_\delta{=}\beta|e\rangle\langle e|$,'
-        r' $M{=}\sigma_y$) vs 3-level $\Lambda$  |  $T = 2\pi$',
-        fontsize=10)
-    ax.set_xlim([FREQS[0], 30])
+    ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)')
+    ax.set_ylabel(r'$\mathcal{F}_e(\omega)\,/\,T^2$')
+    ax.set_xlim([0.01, 30])
     ax.set_ylim([1e-9, 1.5])
-    ax.grid(True, alpha=0.3, which='both')
+    ax.grid(True, alpha=0.25, which='both')
+    ax.tick_params(which='both', top=True, right=True)
 
     handles = [
-        mlines.Line2D([], [], color='k',  lw=2.5, ls='--',
-                      label=r'2-level Ramsey ($F_e(0){=}T^2$)'),
-        mlines.Line2D([], [], color='C3', lw=2,   ls='-',
-                      label=r'3-level Ramsey ($F_e(0){=}T^2/4$)'),
-        mlines.Line2D([], [], color='C0', lw=2,   ls='-',
-                      label=r'3-level GPS $m{=}1$'),
-        mlines.Line2D([], [], color='C2', lw=2,   ls='-',
-                      label=r'3-level GPS $m{=}8$'),
-        mlines.Line2D([], [], color='C1', lw=2,   ls='-',
-                      label=r'3-level double-$\pi$ QSP $n{=}3$ ($F_e(0){\approx}T^2$)'),
+        mlines.Line2D([], [], color='C1', lw=2.0, ls='--',
+                      label=r'2-level Ramsey / 3-level $\pi$-QSP'),
+        mlines.Line2D([], [], color='C3', lw=2.0, ls='--',
+                      label=r'3-level Ramsey'),
+        mlines.Line2D([], [], color='C0', lw=1.6, ls='-',
+                      label=r'GPS $m{=}1$'),
+        mlines.Line2D([], [], color='C2', lw=1.6, ls='-',
+                      label=r'GPS $m{=}8$'),
     ]
-    ax.legend(handles=handles, fontsize=9, loc='lower left')
+    ax.legend(handles=handles, loc='lower left',
+              frameon=True, handlelength=1.5, fontsize=7)
     fig.tight_layout()
 
     for ext in ['pdf', 'png']:

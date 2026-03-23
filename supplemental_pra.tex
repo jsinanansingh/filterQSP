@@ -1,0 +1,1152 @@
+% ============================================================
+%  QSP Clock Protocol  —  Supplemental Material
+%  PRA-style
+% ============================================================
+\documentclass[aps,pra,twocolumn,superscriptaddress,longbibliography]{revtex4-2}
+
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{bm}
+\usepackage{physics}
+\usepackage{xcolor}
+\usepackage{xr}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\graphicspath{{figures/qubit_performance_plots/}}
+
+% Cross-reference main paper equations (compile main_pra first).
+% Prefix M- avoids label collisions (e.g. eq:phop exists in both documents).
+\externaldocument[M-]{main_pra}
+
+\newcommand{\bb}[1]{\mathbf{#1}}
+\newcommand{\id}{\mathbb{I}}
+\newcommand{\w}{\omega}
+\newcommand{\rabi}{\Omega}
+\newcommand{\be}{\begin{equation}}
+\newcommand{\ee}{\end{equation}}
+
+\begin{document}
+
+\title{Supplemental Material:\\
+Noise-Resilient Atomic Clocks via Quantum Signal Processing:\\
+Sensitivity, Filtering, and Multilevel Spectroscopy}
+
+\author{Jasmine Sinanan-Singh}
+\affiliation{Department of Physics, Institution A}
+\author{Leon Zaporski}
+\affiliation{Department of Physics, Institution B}
+\author{Vladan Vuletic}
+\affiliation{Department of Physics, Institution B}
+\author{Isaac L. Chuang}
+\affiliation{Department of Physics, Institution B}
+
+\date{\today}
+
+\maketitle
+
+This Supplemental Material provides extended derivations, additional analytical results,
+numerical simulation details, and pulse optimization descriptions that support the main text.
+Section labels prefixed with ``S'' correspond to supplemental sections.
+
+\setcounter{section}{0}
+\renewcommand{\thesection}{S\Roman{section}}
+\renewcommand{\theequation}{S\arabic{equation}}
+\setcounter{equation}{0}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\setcounter{figure}{0}
+
+
+% ============================================================
+\section{GPS Error Signal and DC Sensitivity for the Three-Level Clock}
+\label{supp:gps_sensitivity}
+% ============================================================
+
+This section derives the exact GPS clock signal for the three-level Lambda system
+and establishes the key result that all GPS-$m$ protocols share the same signal slope as Ramsey.
+
+\subsection*{SI.1 Three-level propagator}
+
+The Lambda system has levels $|g\rangle$, $|e\rangle$, $|m\rangle$ with probe
+drive $H_{\rm drive} = \tfrac{\Omega}{2}(|g\rangle\langle e|+|e\rangle\langle g|)$
+and detuning Hamiltonian $H_\delta = \delta|e\rangle\langle e|$.
+The physically correct form $H_\delta = \delta|e\rangle\langle e|$ is \emph{not}
+traceless in the $\{g,e\}$ probe subspace; it generates a global probe phase
+$e^{-i\delta\tau/2}$ relative to $|m\rangle$.
+
+Over a single continuous drive of duration $T$ at detuning $\delta$, the three-level
+propagator is
+\be
+  U(\delta, T) = e^{-i\delta T/2}
+  \begin{pmatrix}
+    f(\delta,T) & ig(\delta,T) & 0 \\
+    ig^*(\delta,T) & f^*(\delta,T) & 0 \\
+    0 & 0 & e^{i\delta T/2}
+  \end{pmatrix},
+  \label{eq:3level_prop}
+\ee
+where $f$, $g$ are the amplitudes for the SU(2) rotation in the probe
+subspace under the traceless Hamiltonian
+$\tilde{H} = \tfrac{\Omega}{2}\sigma_x^{ge} - \tfrac{\delta}{2}\sigma_z^{ge}$:
+\begin{align}
+  f(\delta,T) &= \cos\!\left(\frac{\Omega_R T}{2}\right)
+    + i\frac{\delta}{\Omega_R}\sin\!\left(\frac{\Omega_R T}{2}\right), \\
+  g(\delta,T) &= -i\frac{\Omega}{\Omega_R}\sin\!\left(\frac{\Omega_R T}{2}\right),
+\end{align}
+with $\Omega_R = \sqrt{\Omega^2 + \delta^2}$.
+
+\subsection*{SI.2 GPS clock signal}
+
+The initial clock state is $|\psi_0\rangle = (|g\rangle+|m\rangle)/\sqrt{2}$ and
+the measurement operator is $M = \sigma_y^{gm} = -i|g\rangle\langle m|+i|m\rangle\langle g|$.
+After the GPS drive, $|g\rangle$ evolves to $U|g\rangle$ while $|m\rangle$ is
+unaffected.  The clock signal is:
+\begin{align}
+  S(\delta)
+  &= \langle\psi_0|U^\dagger M\,U|\psi_0\rangle
+   = 2\,\mathrm{Im}\!\left[\left(U^\dagger|g\rangle\right)^* \cdot
+     \frac{1}{\sqrt{2}}\right] \cdot \frac{1}{\sqrt{2}} \\
+  &= \mathrm{Im}\!\left[e^{i\delta T/2}f^*(\delta,T)\right].
+\end{align}
+Substituting the explicit form of $f$:
+\be
+  \boxed{
+  S(\delta) = \sin\!\left(\frac{\delta T}{2}\right)\cos\!\left(\frac{\Omega_R T}{2}\right)
+            - \frac{\delta}{\Omega_R}\cos\!\left(\frac{\delta T}{2}\right)
+              \sin\!\left(\frac{\Omega_R T}{2}\right).}
+  \label{eq:gps_signal_supp}
+\ee
+This result correctly accounts for the global probe phase; the alternative
+probe-subspace-traceless formula $S = (\delta/\Omega_R)\sin(\Omega_R T/2)$ omits
+this phase and gives incorrect predictions away from $\delta = 0$.
+
+\subsection*{SI.3 Signal Slope: all GPS-$m$ match Ramsey}
+
+Differentiating Eq.~\eqref{eq:gps_signal_supp} with respect to $\delta$ and
+evaluating at $\delta=0$ (where $\Omega_R\to\Omega$, $\partial_\delta\Omega_R\to 0$):
+\begin{align}
+  \partial_\delta S\big|_{\delta=0}
+  &= \frac{T}{2}\cos\!\left(\frac{\Omega T}{2}\right)
+   - \frac{\sin(\Omega T/2)}{\Omega}.
+   \label{eq:gps_deriv_supp}
+\end{align}
+For the GPS-$m$ condition $\Omega T = 2\pi m$ (integer complete Rabi cycles):
+$\sin(m\pi) = 0$ and $\cos(m\pi) = (-1)^m$, so
+\be
+  \partial_\delta S\big|_{\delta=0}^{\rm GPS\text{-}m} = \frac{(-1)^m T}{2},
+  \qquad
+  \left|\partial_\delta S\big|_{\delta=0}\right|^2 = \frac{T^2}{4}.
+  \label{eq:gps_sens_supp}
+\ee
+The \emph{squared} signal sensitivity $T^2/4 = \pi^2$ (for $T = 2\pi$) is the same for
+all $m$ and equals the Ramsey sensitivity, Eq.~(XX) of the main text.
+Consequently, differences in clock performance between GPS protocols arise entirely
+through the filter function $F_e(\omega)$, not through signal sensitivity.
+
+The two-level Ramsey has double the senstivity however. If we use the Kubo variance to calculate the signal slope from the DC sensitivity of the filter function, then the signal slope $\mathcal{S} = \partial_\delta\langle M\rangle|_{\delta=0}$ can also be computed within the temporal QSP framework.
+The detuning $\delta$ enters through the free-evolution phase accumulated during the pulse sequence.
+Taking the derivative of $\langle M\rangle$ with respect to $\delta$ at $\delta = 0$
+yields an expression structurally identical to the Kubo formula but with the deterministic
+detuning Hamiltonian $\delta\sigma_z/2$ replacing the stochastic noise two-level $\beta(t)\sigma_z/2$ or three-level $\beta_e(t) \ket{e}\bra{e}$ and so to first order:
+
+\be
+  \mathcal{S} = \frac{i}{\hbar}\int_0^T dt\,
+     \langle \tilde\Psi | \bigl[M_I(T),\, U_{\rm QSP}^\dagger(t)\,H_{\epsilon}\,U_{\rm QSP}(t)\bigr] | \tilde\Psi \rangle\,.
+  \label{eq:slope_tqsp}
+\ee
+\subsection*{SI.4 GPS filter function}
+
+Because $|\partial_\delta S|^2$ is identical for all GPS-$m$, the FOM ranking is
+determined solely by the Kubo denominator
+$\mathcal{K} = \int_0^\infty F_e(\omega)S(\omega)\,d\omega/(2\pi)$.
+Unlike the GPS signal, $F_e(\omega)$ varies strongly with $m$:
+\begin{itemize}
+  \item GPS-$m=1$ ($\Omega=1$ rad\,s$^{-1}$): $F_e$ is concentrated near $\omega=\Omega=1$,
+        well below the high-pass cutoff $\omega_c = 2$ rad\,s$^{-1}$.
+  \item GPS-$m=8$ ($\Omega=8$ rad\,s$^{-1}$): $F_e$ peaks near $\omega=8$,
+        which is above the cutoff for high-pass noise.
+\end{itemize}
+Protocols with $\Omega < \omega_c$ are effectively transparent to band-limited noise,
+explaining the anomalously large FOM of GPS-$m=1$ under high-pass noise.
+
+
+% ============================================================
+\section{Complete Kubo Variance Derivation}
+\label{supp:kubo_full}
+% ============================================================
+
+This section provides the full derivation of the filter function formula used
+throughout the paper, including the two-level qubit case and its three-level
+Lambda clock generalization.
+
+\subsection*{SII.1 Two-level qubit sensor}
+
+Consider a single-qubit sensor with states $\{|g\rangle, |e\rangle\}$ and a
+QSP control sequence described by the SU(2) propagator
+\be
+  U_{\rm QSP}(t) = \begin{pmatrix} F(t) & iG^*(t) \\ iG(t) & F^*(t) \end{pmatrix},
+  \qquad |F|^2 + |G|^2 = 1.
+\ee
+The noise Hamiltonian is $H_\epsilon = \beta(t)\sigma_z^{ge}/2$ (symmetric detuning
+fluctuation).  In the toggling frame of $U_{\rm QSP}$:
+\begin{align}
+  \tilde{H}(t) &= U_{\rm QSP}^\dagger H_\epsilon U_{\rm QSP} \\
+  &= \frac{\beta(t)}{2}\!\begin{pmatrix}
+      |F|^2-|G|^2 & -2iF^*G^* \\
+      2iFG        & |G|^2-|F|^2
+    \end{pmatrix}\!.
+\end{align}
+For initial state $|\psi_0\rangle = (|g\rangle+|e\rangle)/\sqrt{2}$ and
+observable $M = \sigma_y^{ge}$, the Kubo linear-response formula gives
+\begin{align}
+  \langle\delta M^2\rangle
+  &= \int \frac{d\omega}{2\pi}\, S_\beta(\omega)\, F_e^{\rm 2L}(\omega), \\
+  F_e^{\rm 2L}(\omega) &= |\Phi(\omega)|^2,
+  \qquad \Phi(\omega) = \int_0^T dt\, F^*(t)G(t)\,e^{-i\omega t}.
+  \label{eq:Fe_2level}
+\end{align}
+The filter function $F_e^{\rm 2L} = |\Phi|^2$ is the standard result for
+spin-echo and dynamical decoupling sequences~\cite{Biercuk2011}, where
+$\Phi(t) = F^*(t)G(t)$ is the off-diagonal path function.
+For Ramsey (two $\pi/2$ pulses of negligible duration with free evolution $T$):
+$F(t)\approx 1$, $G(t)\approx 0$ except during free evolution where $G(t) = i\sin(\delta t/2)$,
+giving $F_e^{\rm Ramsey} \approx 4\sin^2(\omega T/2)/\omega^2$.
+
+\subsection*{SII.2 Three-level Lambda clock: two noise channels}
+
+For the three-level Lambda system, we have two independent noise channels:
+\begin{itemize}
+  \item \emph{Probe noise}: $H_e = \beta_e(t)|e\rangle\langle e|$ with PSD $S_e(\omega)$.
+  \item \emph{Clock noise}: $H_m = \beta_m(t)|m\rangle\langle m|$ with PSD $S_m(\omega)$.
+\end{itemize}
+The QSP drive acts only on the $\{g,e\}$ probe subspace, so $|m\rangle$ is unaffected.
+The three-level propagator in the probe subspace takes the block form:
+\be
+  U_{\rm QSP}^{(3)} = \begin{pmatrix}
+    F & iG^* & 0 \\ iG & F^* & 0 \\ 0 & 0 & 1
+  \end{pmatrix}.
+\ee
+The toggled probe noise operator is:
+\begin{align}
+  \tilde{A}_e(t)
+  &\equiv (U_{\rm QSP}^{(3)})^\dagger |e\rangle\langle e|\, U_{\rm QSP}^{(3)} \\
+  &= |G|^2|g\rangle\langle g| + |F|^2|e\rangle\langle e|
+     + iF^*G^*|g\rangle\langle e| - iFG|e\rangle\langle g|.
+\end{align}
+The toggled clock noise operator is $\tilde{A}_m = |m\rangle\langle m|$ (unchanged).
+
+\subsection*{SII.3 Sensitivity trajectory and classical noise variance}
+
+For a single shot with noise realization $\beta_e(t)$, the signal mean shifts by
+\be
+  \delta\langle M\rangle = -i\int_0^T dt\,\beta_e(t)\,
+    \langle\psi_0|[M_I(T),\,\tilde{A}_e(t)]|\psi_0\rangle,
+\ee
+where $M_I(T) \equiv U^\dagger(T) M U(T)$ is the \emph{interaction-frame observable}
+(the lab-frame measurement $M$ conjugated by the full propagator at time $T$),
+and $\tilde{A}_e(t) = U^\dagger(t)|e\rangle\langle e|U(t)$ is the toggled probe noise.
+The \emph{sensitivity trajectory} is
+$r(t) \equiv \langle\psi_0|[M_I(T),\,\tilde{A}_e(t)]|\psi_0\rangle$.
+
+\textbf{General Bloch decomposition of $M_I(T)$.}
+With $M = \sigma_y^{gm}$ and the three-level propagator
+(block-diagonal with SU(2) block $(F(T),G(T))$ in $\{g,e\}$ and unity on $|m\rangle$),
+direct matrix multiplication gives the restriction of $M_I(T)$ to the $\{g,m\}$ subspace:
+\be
+  M_I(T)\big|_{gm} = m_y\,\sigma_y^{gm} + m_x\,\sigma_x^{gm},
+  \label{eq:MI_bloch}
+\ee
+where
+\be
+  m_y = \mathrm{Re}[F(T)],\qquad m_x = -\mathrm{Im}[F(T)].
+  \label{eq:bloch_components}
+\ee
+The $\sigma_z^{gm}$ component vanishes identically ($m_z = 0$) because $M = \sigma_y^{gm}$
+has no diagonal part in $\{g,m\}$.
+$M_I(T)$ also acquires off-diagonal matrix elements coupling $\{g,m\}$ to $|e\rangle$
+whenever $G(T)\neq 0$; these contribute to the sensitivity trajectory (see below).
+
+\textbf{Case $G(T)=0$ (Ramsey, GPS-$m$, equiangular).}
+When the propagator returns to the probe subspace at $t=T$ (i.e., $G(T)=0$, so
+$|F(T)|=1$), the $|e\rangle$-coupling terms in $M_I(T)$ vanish.
+Evaluating $r(t)$ for $|\psi_0\rangle=(|g\rangle+|m\rangle)/\sqrt{2}$ gives:
+\be
+  r(t) = i\,m_y\,|G(t)|^2 = i\,m_y\,\chi(t),
+  \label{eq:r_G0}
+\ee
+where $\chi(t)\equiv|G(t)|^2$ is the population channel path function
+and $m_y = \mathrm{Re}[F(T)] = \pm 1$.
+For GPS-$m$ at exact resonance ($\Omega T = 2\pi m$):
+$F(T)=(-1)^m$ and hence $m_y = (-1)^m$, $m_x = 0$, so $M_I(T) = (-1)^m M$.
+In particular, $M_I(T) = M$ only for even $m$ (and whenever $G(T)=0$, $F(T)=+1$).
+Since $m_y^2 = 1$, the filter function $\mathcal{F}_e(\omega)=|m_y|^2|\mathcal{X}(\omega)|^2=|\mathcal{X}(\omega)|^2$
+is independent of the sign of $m_y$.
+
+\textbf{Case $G(T)\neq 0$ (general pulsed QSP).}
+When $G(T)\neq 0$, $M_I(T)$ has additional matrix elements coupling $|e\rangle$
+to $\{g,m\}$.  The sensitivity trajectory acquires an extra coherence-channel contribution:
+\be
+  r(t) = i\bigl[\mathrm{Re}[F(T)]\,\chi(t)
+               + \mathrm{Re}[G(T)\,\varphi^*(t)]\bigr],
+  \label{eq:r_general}
+\ee
+where $\varphi(t)=F^*(t)G(t)$ is the coherence-channel path function.
+The filter function is then no longer simply $|\mathcal{X}|^2$ but receives
+cross-contributions from $\Phi(\omega)=\mathcal{F}[\varphi]$.
+For sequences satisfying $G(T)=0$ the second term vanishes and Eq.~\eqref{eq:r_G0} is recovered.
+The shot-to-shot classical variance of $\langle M\rangle$ is then:
+\begin{align}
+  \overline{\delta\langle M\rangle^2}_{\rm noise}
+  &= \int\frac{d\omega}{2\pi}\,S_e(\omega)\,\Bigl|\mathcal{F}[r(t)](\omega)\Bigr|^2 \\
+  &= \int_{-\infty}^{\infty}\frac{d\omega}{2\pi}\,S_e(\omega)\,|\mathcal{X}(\omega)|^2,
+\end{align}
+where $\mathcal{X}(\omega) = \mathcal{F}[\chi(t)] = \int_0^T|G(t)|^2 e^{-i\omega t}\,dt$.
+The DC value satisfies $|\mathcal{X}(0)|^2 = \mathcal{S}^2$ identically (the DC
+consistency condition, Sec.~SII.4), so the filter function and signal slope
+are not independent.
+
+For the normalized frequency variance $\sigma^2_\nu$ (main text Eq.~\eqref{M-eq:fom}),
+only the resolvable frequency band contributes:
+\be
+  \mathcal{V} = \int_{\omega_{\min}}^{\infty}\frac{d\omega}{2\pi}\,
+    S_e(\omega)\,|\mathcal{X}(\omega)|^2\,,
+  \qquad \omega_{\min} = \frac{2\pi}{T}\,,
+\ee
+where the lower cutoff is the Fourier resolution limit.
+Noise oscillating slower than one clock cycle cannot be distinguished from a
+constant offset and contributes no frequency-estimation variance.
+
+\textit{Note.} The full quantum Kubo variance $\langle\delta M^2\rangle$ contains an
+additional coherence-channel contribution $\tfrac{1}{2}|\Phi(\omega)|^2$ from
+the $-\sigma_z/2$ (differential g--e phase) part of $|e\rangle\langle e|$.
+This term drives off-axis quantum fluctuations in the probe coherence $F^*G$
+but does not contribute to the variance of the classical signal mean $\langle M\rangle$
+that a clock experiment measures.
+
+\subsection*{SII.4 DC consistency and signal slope}
+
+At $\omega=0$, the filter function equals:
+\be
+  \mathcal{F}_e(0) = |\mathcal{X}(0)|^2 = \Bigl|\int_0^T|G(t)|^2 dt\Bigr|^2.
+\ee
+We verify that this equals the squared signal slope
+$\mathcal{S}^2 = |\partial_\delta\langle M\rangle|^2_{\delta=0}$.
+Treating $\delta$ as a perturbation, the first-order signal slope is
+(cf.\ Eq.~\eqref{eq:r_G0} and the Dyson expansion):
+\be
+  \mathcal{S} = \partial_\delta\langle M\rangle\big|_{\delta=0}
+  = -i\int_0^T r(t)\,dt\,,
+\ee
+where $r(t) = \langle\psi_0|[M_I(T),\tilde{A}_e(t)]|\psi_0\rangle$ is the
+sensitivity trajectory of Sec.~SII.3, with $M_I(T)=U^\dagger(T)MU(T)$.
+For sequences with $G(T)=0$, inserting $r(t)=i\,m_y\,\chi(t)$ (Eq.~\eqref{eq:r_G0}):
+$\mathcal{S} = -i\int_0^T i\,m_y\,\chi(t)\,dt = m_y\,\mathcal{X}(0)$,
+and since $m_y = \mathrm{Re}[F(T)] = \pm 1$ when $|G(T)|=0$,
+\be
+  \mathcal{S}^2 = m_y^2\,|\mathcal{X}(0)|^2 = |\mathcal{X}(0)|^2 = \mathcal{F}_e(0)\,,
+\ee
+confirming
+\be
+  \mathcal{F}_e(0) = |\mathcal{X}(0)|^2 = \mathcal{S}^2\,.
+  \label{eq:dc_consistency_supp}
+\ee
+This \emph{DC consistency condition} is the foundation of the normalized FOM
+(main text Eq.~\eqref{M-eq:fom} and Eq.~\eqref{M-eq:dc_consistency}):
+$\mathcal{F}_e(0)$ serves simultaneously as the squared signal slope (sensitivity)
+\emph{and} as the filter function evaluated at zero frequency, placing DC response
+and off-DC noise coupling on the same scale.
+In particular, the denominator of $\sigma^2_\nu = \mathcal{V}/\mathcal{F}_e(0)$
+is entirely determined by the filter function, not by an independent sensitivity calculation.
+Ramsey spectroscopy saturates the Fourier bound $\mathcal{F}_e^{\rm Ramsey}(0) = T^2/4$~\cite{};
+general QSP sequences may deviate from this bound.
+
+\subsection*{SII.5 Three-level filter function (probe noise)}
+
+Collecting the results of Secs.~SII.2--SII.4, the classical noise variance due to
+probe-laser frequency noise $H_e = \beta_e(t)|e\rangle\langle e|$ is:
+\be
+  \overline{\langle\delta M\rangle^2}_{\rm noise}
+  = \int_{-\infty}^{\infty}\frac{d\omega}{2\pi}\,
+    S_{\beta_e}(\omega)\,\mathcal{F}_e(\omega)\,,
+  \label{eq:full_var_supp}
+\ee
+with
+\be
+  \boxed{\mathcal{F}_e(\omega) = |\mathcal{X}(\omega)|^2\,,
+  \qquad \mathcal{X}(\omega) = \int_0^T|G(t)|^2\,e^{-i\omega t}\,dt\,.}
+  \label{eq:Fe_3level_supp}
+\ee
+This is the main result of Sec.~SII.
+The filter function depends only on the population channel $\chi(t)=|G(t)|^2$
+and holds for all sequences satisfying $G(T)=0$ (Ramsey, GPS-$m$, equiangular).
+The $\tfrac{1}{2}|\Phi|^2$ coherence-channel contribution that appears in the
+full quantum Kubo variance $\langle\delta M^2\rangle$ does not contribute to the
+variance of the classical signal mean $\langle M_I(T)\rangle$ (see Sec.~SII.3).
+
+\subsection*{SII.6 Remark: clock-transition noise}
+
+An independent noise channel $H_m = \beta_m(t)|m\rangle\langle m|$ on the clock
+transition produces an additional variance contribution.
+Because $|m\rangle$ is completely decoupled from the probe drive, the
+$|m\rangle$ component of the final wavefunction acquires only a stochastic phase
+$\varphi_m = \int_0^T\!\beta_m(t)\,dt$, giving a protocol-independent filter function
+\be
+  \mathcal{F}_m(\omega) = \frac{1-\cos\omega T}{\omega^2}\,.
+  \label{eq:Fm_supp}
+\ee
+This term is the same for all pulse sequences (it depends only on $T$, not on $F(t)$
+or $G(t)$) and cancels in any protocol comparison.
+We therefore restrict attention to probe noise ($\mathcal{F}_e$) throughout the main text.
+
+\subsection*{SII.7 GPS filter function}
+
+For a GPS sequence (continuous drive at frequency $\Omega$ for time $T$), the CK
+amplitudes evolve as:
+\begin{align}
+  F(t) &= e^{-i\delta t/2}\!\left[\cos\!\tfrac{\Omega_R t}{2}
+           + i\tfrac{\delta}{\Omega_R}\sin\!\tfrac{\Omega_R t}{2}\right], \\
+  G(t) &= e^{-i\delta t/2}\!\left[-i\tfrac{\Omega}{\Omega_R}\sin\!\tfrac{\Omega_R t}{2}\right].
+\end{align}
+At $\delta = 0$: $F(t) = \cos(\Omega t/2)$, $G(t) = -i\sin(\Omega t/2)$, so
+$\varphi(t) = F^*G = i\cos(\Omega t/2)\sin(\Omega t/2) = \tfrac{i}{2}\sin(\Omega t)$
+and $|G(t)|^2 = \sin^2(\Omega t/2) = \tfrac{1}{2}[1-\cos(\Omega t)]$.
+The filter function therefore has oscillatory structure at the drive frequency $\Omega$,
+not at harmonics — GPS $F_e$ is peaked near $\omega = \Omega$, not nulled there.
+
+
+% ============================================================
+\section{Roll-Off Analysis: Smoothness and Fourier Decay}
+\label{supp:rolloff}
+% ============================================================
+
+\subsection*{SIII.1 Piecewise regularity of the path functions}
+
+The high-frequency roll-off of the filter function is controlled by the regularity
+of the path functions $\varphi(t) = F^*(t)G(t)$ and $\chi(t) = |G(t)|^2$.
+Two qualitatively different cases arise depending on whether pulses are
+instantaneous or finite-duration.
+
+For \emph{instantaneous} (zero-duration) pulses, $\varphi(t)$ and $\chi(t)$ are
+piecewise constant between pulse times, so they have jump discontinuities at
+each pulse application.
+A function with a jump discontinuity has Fourier transform decaying as
+$|\hat f(\omega)| \sim 1/\omega$, giving $F_e \sim \omega^{-2}$.
+
+For \emph{finite-duration square} pulses (piecewise-constant $\Omega_j$, $\phi_j$
+within each segment), the CK amplitudes $F(t)$ and $G(t)$ are continuous everywhere
+because the propagator evolves continuously.
+Consequently $\varphi(t)$ and $\chi(t)$ are also continuous at segment boundaries.
+However, their first derivatives have jump discontinuities there, because the
+Rabi frequency $\Omega$ changes abruptly.
+By integration by parts once, the boundary terms vanish (continuity), leaving:
+$|\hat\chi(\omega)| \leq C/\omega^2$, and hence $F_e = |\hat\chi|^2 \sim \omega^{-4}$.
+
+\subsection*{SIII.2 Smooth envelope sequences}
+
+Two filter-function channels contribute to $\mathcal{F}_e$:
+the \emph{probe channel} $|\Phi(\omega)|^2$ with $\Phi=\mathcal{F}[F^*G]$, and
+the \emph{clock channel} $|\mathcal{X}(\omega)|^2$ with $\mathcal{X}=\mathcal{F}[|G|^2]$.
+For sequences satisfying $G(T)=0$ (GPS-$m$, Ramsey, equiangular) only the clock channel
+contributes (Sec.~SII.2); for general QSP sequences with $G(T)\neq 0$ both channels appear.
+The roll-off of each channel is controlled by the smoothness of the corresponding
+path function at segment boundaries.
+
+\textbf{Probe channel} $|\Phi|^2$:
+For a pulse with smooth envelope $\Omega(t)$ satisfying $\Omega(0)=\Omega(\tau)=0$
+and $k$ continuous derivatives at pulse boundaries, $F^*(t)G(t)$ inherits $k$
+continuous derivatives globally.
+By the Riemann--Lebesgue lemma and integration by parts $k+1$ times:
+\be
+  |\hat\Phi(\omega)| \leq \frac{C_k}{|\omega|^{k+1}}\,,
+\ee
+so $|\hat\Phi|^2 \leq C_k^2/\omega^{2(k+1)}$.
+
+\textbf{Clock channel} $|\mathcal{X}|^2$ for GPS-$m$ (single segment, $\Theta=2\pi m$):
+The integer-rotation condition pins $G(0)=G(T)=0$, so $|G(t)|^2$ vanishes at both
+boundaries automatically (and its first derivative vanishes since
+$\partial_t|G|^2 = \sin(\theta)\Omega/2\big|_{0,T}=0$).
+For a square envelope, $\partial_t^2|G|^2\big|_0 = \Omega^2/2 \neq 0$, giving $n=2$
+vanishing derivatives and $\mathcal{F}_e\sim\omega^{-4}$.
+For a raised-cosine envelope with $\Omega(0)=\Omega(T)=0$, $\theta(t)\sim t^3$ near
+$t=0$, so $|G|^2=\sin^2(\theta/2)\sim t^6$, giving $n=6$ and $\mathcal{F}_e\sim\omega^{-12}$.
+
+Explicit roll-off exponents are summarized in Tables~\ref{tab:rolloff_probe} and~\ref{tab:rolloff_clock}.
+
+\begin{table}[h]
+\caption{Probe-channel ($|\Phi(\omega)|^2$) roll-off for sequences with $G(T)\neq0$.
+$k$ = number of continuous derivatives of $F^*(t)G(t)$ at pulse boundaries;
+$|\hat\Phi|\leq C/|\omega|^{k+1}$ gives $\mathcal{F}_e^{\rm probe}\sim\omega^{-2(k+1)}$.}
+\label{tab:rolloff_probe}
+\centering
+\begin{tabular}{lcc}
+\hline
+Pulse type & $k$ & $\mathcal{F}_e^{\rm probe}$ roll-off \\
+\hline
+Instantaneous ($t_p \to 0$) & $-1$ & $\omega^{-2}$ \\
+Square (piecewise constant) & $0$  & $\omega^{-4}$ \\
+Raised-cosine envelope      & $1$  & $\omega^{-6}$ \\
+$C^\infty$ envelope         & $\infty$ & faster than any power \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\caption{Clock-channel ($|\mathcal{X}(\omega)|^2$) roll-off for GPS-$m$ sequences ($G(T)=0$,
+integer Rabi cycles $\Theta=2\pi m$).
+$n$ = number of vanishing derivatives of $|G(t)|^2$ at $t=0,T$;
+$|\hat{\mathcal{X}}|\leq C/|\omega|^n$ gives $\mathcal{F}_e^{\rm clock}\sim\omega^{-2n}$.}
+\label{tab:rolloff_clock}
+\centering
+\begin{tabular}{lcc}
+\hline
+Envelope & $n$ & $\mathcal{F}_e^{\rm clock}$ roll-off \\
+\hline
+Square (piecewise constant) & $2$ & $\omega^{-4}$ \\
+Raised-cosine ($\Omega(0)=\Omega(T)=0$) & $6$ & $\omega^{-12}$ \\
+$C^\infty$ flat-top (Planck-taper) & $\infty$ & faster than any power \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection*{SIII.3 Constraint: fixed pulse area}
+
+For a smooth envelope, the constraint $\int_0^{\tau}\Omega(t)\,dt = 2\pi m$ (integer
+Rabi cycles for GPS-$m$) must be maintained.  The raised-cosine envelope:
+\be
+  \Omega(t) = \bar\Omega\left(1 - \cos\frac{2\pi t}{\tau}\right)\,,\quad
+  \bar\Omega = \frac{2\pi m}{\tau}\,,
+\ee
+satisfies both the boundary condition $\Omega(0)=\Omega(\tau)=0$ and the area condition.
+For GPS-$m$ (clock channel), this envelope achieves $\mathcal{F}_e\sim\omega^{-12}$;
+for multi-segment sequences where the probe channel dominates, it achieves $\omega^{-6}$.
+
+
+% ============================================================
+\section{Effective Noise Model: Instantaneous Pulse Limit}
+\label{supp:effective_model}
+% ============================================================
+
+\subsection*{SIV.1 Model derivation}
+
+In the limit $\Omega_{\rm fast} \gg \beta_{\rm rms}$ (fast strong pulses), the noise Hamiltonian
+$H_\epsilon(t)$ commutes with the $\sigma_z$ free-evolution operator during the
+interpulse intervals but \emph{not} during pulses.
+If additionally the pulse durations $\tau_p \ll 1/\omega_c$ (pulse time much less than
+the noise correlation time), the noise accumulated during the pulses is negligible.
+In this double limit, the noise enters only through the phase accumulated during the
+free-evolution intervals:
+\be
+  \delta_j = \int_{t_{j-1}^{\rm free}}^{t_j^{\rm free}} \beta(t)\,dt\,,
+\ee
+and the noisy propagator is:
+\be
+  U_{\rm QSP}^{\rm noisy} = e^{i\phi_0\sigma_x/2}\prod_{j=1}^d
+    e^{i(\Delta\tau_j + \delta_j)\sigma_z/2}\,e^{i\phi_j\sigma_x/2}\,.
+\ee
+
+\subsection*{SIV.2 QSP polynomial recurrences in the instantaneous model}
+
+The canonical QSP polynomials satisfy:
+\begin{align}
+  f_j &= e^{i(\Delta\tau_j+\delta_j)/2}\Bigl(\cos\tfrac{\phi_j}{2}\,f_{j-1}
+         - e^{-i(\Delta\tau_j+\delta_j)}\sin\tfrac{\phi_j}{2}\,g_{j-1}^*\Bigr)\,, \\
+  g_j &= e^{i(\Delta\tau_j+\delta_j)/2}\Bigl(\cos\tfrac{\phi_j}{2}\,g_{j-1}
+         + e^{-i(\Delta\tau_j+\delta_j)}\sin\tfrac{\phi_j}{2}\,f_{j-1}^*\Bigr)\,,
+\end{align}
+with $f_0 = 1$, $g_0 = 0$.
+In the absence of noise ($\delta_j \equiv 0$), these reduce to standard QSP.
+Expanding to first order in $\delta_j$ recovers the Kubo result of the main text.
+
+\subsection*{SIV.3 Dynamic range and fringe-hopping}
+
+The instantaneous model provides a natural framework for computing the \emph{capture range}
+of a clock servo.
+For a QSP error signal $\langle M\rangle(\delta)$,
+the error signal is approximately linear in $\delta$ for $|\delta| \lesssim \delta_{\rm lock}$
+where $\delta_{\rm lock}$ is the half-width of the central fringe.
+
+For Ramsey, the signal is approximately $-\sin(\delta T_{\rm free}/2)$, so
+$\delta_{\rm lock}^{\rm Ramsey} \approx \pi/T_{\rm free} \approx \pi/T$.
+For GPS-$m$ at $\delta = 0$ with the \emph{correct} Hamiltonian
+$H_\delta = \delta|e\rangle\langle e|$, the exact clock signal is
+(main text Eq.~\eqref{M-eq:gps_signal})
+\be
+  S(\delta) = \sin\!\left(\frac{\delta T}{2}\right)\cos\!\left(\frac{\Omega_R T}{2}\right)
+  - \frac{\delta}{\Omega_R}\cos\!\left(\frac{\delta T}{2}\right)\sin\!\left(\frac{\Omega_R T}{2}\right).
+\ee
+For small $\delta$ with GPS-$m$ ($\Omega T = 2\pi m$, integer $m$):
+$\cos(\Omega_R T/2) \to (-1)^m$ and $\sin(\Omega_R T/2) \to 0$ to leading order, so
+$S(\delta) \approx (-1)^m \sin(\delta T/2)$.
+The fringe half-width is therefore
+\be
+  \delta_{\rm lock}^{\rm GPS} \approx \frac{\pi}{T}\,,
+\ee
+the \emph{same} as Ramsey, independent of $m$.
+(The claim that GPS-$m$ has a fringe $m$ times narrower arises from the
+probe-subspace-traceless signal formula, which is incorrect for
+$H_\delta = \delta|e\rangle\langle e|$; see main text Sec.~SI.)
+
+The probability of fringe-hopping per cycle can be estimated from the noise statistics:
+\be
+  P_{\rm hop} \approx \mathrm{erfc}\!\left(\frac{\delta_{\rm lock}}{\sqrt{2}\,\sigma_\delta}\right)\,,
+  \label{eq:phop}
+\ee
+where $\sigma_\delta = [\int_0^T S_\beta(\omega)\,d\omega/(2\pi)]^{1/2}$ is the rms noise
+within the interrogation bandwidth.
+Since $\delta_{\rm lock}^{\rm GPS} \approx \delta_{\rm lock}^{\rm Ramsey}$,
+GPS protocols at $\delta=0$ offer the same fringe-hopping robustness as Ramsey.
+
+
+% ============================================================
+\section{Numerical Simulation Details}
+\label{supp:numerics}
+% ============================================================
+
+\subsection*{SV.1 Filter function computation via FFT}
+
+All filter function integrals are evaluated using the following procedure.
+Given a pulse sequence of total duration $T$:
+\begin{enumerate}
+  \item Propagate $U_{\rm QSP}(t)$ at $N_{\rm samp}$ uniformly spaced time points
+        $t_k = k\,T/N_{\rm samp}$, recording $F(t_k)$ and $G(t_k)$.
+  \item Form the path function samples $\varphi_k = F^*(t_k)G(t_k)$ and
+        $\chi_k = |G(t_k)|^2$.
+  \item Zero-pad by a factor $p$ (pad factor) to reach $pN_{\rm samp}$ total points,
+        then apply the discrete Fourier transform:
+        $\Phi(\omega_j) = \sum_k \varphi_k\,e^{-2\pi ijk/(pN_{\rm samp})}$.
+  \item Compute $F(\omega_j) = |\chi(\omega_j)|^2$
+        at positive frequencies $\omega_j = 2\pi j/(pT)$ for $j=0,\ldots,pN_{\rm samp}/2$.
+  \item The maximum frequency resolved is $\omega_{\rm max} = \pi N_{\rm samp}/T$.
+\end{enumerate}
+Production runs use $N_{\rm samp} = 4096$ and pad factor $p=4$, giving
+$\omega_{\rm max} = 2048$~rad\,s$^{-1}$ for $T = 2\pi$.
+Optimization runs use $N_{\rm samp} = 1024$, $p=2$, trading frequency resolution
+for speed; the resulting objective is sufficiently smooth for convergence.
+
+\subsection*{SV.2 Unit tests}
+
+The simulation code passes the following unit tests:
+\begin{enumerate}
+  \item Three-level Ramsey filter function matches analytic formula
+        $F^{\rm Ramsey}(\omega) = \sin^2(\omega T/2)/\omega^2$ to $<1\%$
+        for $\omega \in [0.01/T, 100/T]$ (factor of 4 smaller than the
+        two-level formula~\eqref{eq:Fe_2level} because only $|\mathcal{X}|^2$
+        contributes for the three-level case).
+  \item GPS-$m$ sensitivity $|\partial_\delta S|_{\delta=0}|^2 = \pi^2$ for $m = 1, 2, 4, 8$
+        (all equal to Ramsey), verified by finite-difference differentiation to $<10^{-6}$.
+  \item GPS-$m$ filter function amplitude at $\omega = \Omega$ is nonzero (peaked),
+        confirming the absence of exact nulls at the drive frequency.
+  \item Noiseless Bloch sphere trajectory for QSP sequences matches analytic
+        CK polynomial predictions to relative error $< 10^{-10}$.
+  \item Kubo variance $\langle\delta M^2\rangle$ computed by direct integration
+        matches the FOM denominator $\int F_e(\omega)S(\omega)d\omega/(2\pi)$
+        to $<0.1\%$ for white and $1/f$ noise PSDs.
+\end{enumerate}
+
+% ============================================================
+\section{Pulse Optimization Details}
+\label{supp:optimization}
+% ============================================================
+
+This section describes the optimization algorithms used to generate the
+equiangular and pulsed QSP sequences reported in the main text.
+
+\subsection*{SVI.1 Optimization objective}
+
+The primary reported figure of merit is the normalized frequency variance
+(main text, Eq.~\eqref{M-eq:fom}):
+\be
+  \sigma^2_\nu(\boldsymbol{\lambda}) = \frac{\mathcal{V}(\boldsymbol{\lambda})}{\mathcal{F}_e(0;\boldsymbol{\lambda})}\,,
+  \qquad
+  \mathcal{V} = \int_{\omega_{\min}}^\infty \mathcal{F}_e(\omega;\boldsymbol{\lambda})\,S(\omega)\,
+    \frac{d\omega}{2\pi}\,,
+  \label{eq:fom_opt}
+\ee
+where $\omega_{\min} = 2\pi/T$ is the Fourier resolution limit.
+By the DC consistency condition~\eqref{M-eq:dc_consistency},
+$\mathcal{F}_e(0;\boldsymbol{\lambda}) = |\partial_\delta\langle M\rangle|^2_{\delta=0}$,
+so the denominator is the squared signal slope.
+The filter function $\mathcal{F}_e(\omega) = |\mathcal{X}(\omega)|^2$
+and $\boldsymbol{\lambda}$ denotes the protocol parameters.
+
+\paragraph{Optimization objective.}
+Direct minimization of $\sigma^2_\nu = \mathcal{V}/\mathcal{F}_e(0)$ can converge
+to degenerate solutions in which $\mathcal{F}_e(0)\to 0$ (loss of DC sensitivity),
+making the ratio trivially small.
+To avoid this, the optimizer instead minimizes the \emph{Ramsey-normalized objective}:
+\be
+  f(\boldsymbol{\lambda}) = \frac{1}{\mathcal{F}_e(0;\boldsymbol{\lambda})}
+    + \frac{\mathcal{V}(\boldsymbol{\lambda})}{\mathcal{V}_{\rm Ramsey}}\,,
+  \label{eq:score_rn_supp}
+\ee
+where $\mathcal{V}_{\rm Ramsey} = \int_{\omega_{\min}}^\infty \mathcal{F}_e^{\rm Ramsey}(\omega)
+S(\omega)\,d\omega/(2\pi)$ is the noise variance of the Ramsey protocol evaluated
+under the same PSD $S(\omega)$.
+Both terms equal unity at Ramsey, providing a natural scale.
+The first term penalizes low DC sensitivity; the second term penalizes noise variance
+on the scale set by Ramsey, preventing degenerate collapses of $\mathcal{F}_e(0)$.
+
+All integrals are evaluated numerically via FFT (Sec.~\ref{supp:numerics}).
+The final reported metric for all protocols is $\sigma^2_\nu$, not $f$.
+
+\subsection*{SVI.2 Equiangular sequence: parameter space and algorithm}
+
+The equiangular $N$-pulse sequence~\cite{Cummins2003} has $N$ equal-duration pulses
+at drive frequency $\Omega$ and phases $\phi_j$ ($j=0,\ldots,N-1$), with interpulse
+free evolution set so that the total sequence duration equals $T$.
+The free parameters are:
+\begin{itemize}
+  \item Drive frequency $\Omega \in (0, \Omega_{\rm max}]$, where
+        $\Omega_{\rm max} = \min(1.5\,\omega_c, 40)$ for band-limited noise and
+        $\Omega_{\rm max} = 40$~rad\,s$^{-1}$ for unbounded spectra.
+  \item Pulse phases $\phi_j \in [0, 2\pi)$, $j = 0,\ldots,N-1$.
+\end{itemize}
+Total parameters: $N+1$ for equiangular-$N$.
+
+The optimization proceeds in two stages:
+\begin{enumerate}
+  \item \textbf{Global search}: Differential Evolution (DE) with population size 20
+        and maximum 500 generations, applied to the $(N+1)$-dimensional parameter space.
+        DE uses the ``best/1/bin'' mutation strategy with crossover probability 0.7.
+        Multiple random restarts (12 restarts with different seeds) are used to
+        mitigate convergence to local minima.
+  \item \textbf{Local refinement}: L-BFGS-B applied to the best DE solution,
+        with gradient estimated by central finite differences.
+        Convergence tolerance: $\Delta\mathcal{C} < 10^{-9}$ and
+        $|\nabla\mathcal{C}| < 10^{-7}$.
+\end{enumerate}
+
+\paragraph{White noise optimum ($N=4$).}
+For white noise $S(\omega)=1$, the optimal equiangular-4 parameters found by
+minimizing $f$~\eqref{eq:score_rn_supp} are:
+$\Omega^* T \approx 5.56$~rad, phases $\boldsymbol{\phi}^* \approx [2.48,\; 3.38,\; 2.09,\; 3.00]$~rad,
+giving $\mathcal{F}_e(0)\approx10.68$ and $\sigma^2_{\nu,w}\approx3.46\times10^{-3}$.
+This corresponds to $\Omega^* \approx 5.56/(2\pi) \approx 0.88$ complete Rabi cycles
+per interrogation period.
+
+\subsection*{SVI.3 Pulsed QSP sequence: parameter space and algorithm}
+
+The pulsed QSP sequence consists of $n$ fast rotations $R(\theta_j, \phi_j)$
+(rotation angle $\theta_j$ about an in-plane axis at angle $\phi_j$) separated
+by $n-1$ equal free-evolution gaps of duration $\tau_{\rm free}$.
+Each rotation is implemented with a fast drive at $\Omega_{\rm fast} = 20\pi$~rad\,s$^{-1}$,
+giving pulse duration $\tau_j = \theta_j/\Omega_{\rm fast}$.
+The free-evolution gap is determined by the constraint that the total sequence
+duration equals $T$:
+\be
+  \tau_{\rm free} = \frac{T - \sum_{j=1}^n \tau_j}{n-1}
+    = \frac{T - \sum_j\theta_j/\Omega_{\rm fast}}{n-1}.
+\ee
+The free parameters are $\boldsymbol{\lambda} = (\theta_1,\ldots,\theta_n,\phi_2,\ldots,\phi_n)$,
+giving $2n-1$ total parameters (the first phase $\phi_1$ is fixed to zero by rotational
+symmetry).
+
+Parameter bounds:
+\begin{itemize}
+  \item $\theta_j \in [0.01\pi,\; \pi]$: lower bound avoids degenerate zero-rotation
+        pulses; upper bound restricts to at most one Rabi half-cycle per pulse.
+  \item $\phi_j \in [0,\; 2\pi)$: unconstrained rotation phase.
+  \item Feasibility: $\tau_{\rm free} > 0$ requires
+        $\sum_j\theta_j < (n-1)\Omega_{\rm fast}T$, which is always satisfied
+        for $\Omega_{\rm fast} T = 40\pi^2 \gg n\pi$.
+\end{itemize}
+
+The optimization uses the same two-stage DE + L-BFGS-B approach as equiangular,
+with budgets scaled by the number of free parameters:
+
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+$n$ & Free params & DE pop & DE maxiter \\
+\midrule
+4  & 7  & 10 & 150 \\
+8  & 15 & 10 & 100 \\
+13 & 25 & 8  & 80  \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Multiple restarts (4 for $n=4$, 3 for $n=8$, 2 for $n=13$) are performed; the best
+result across restarts is refined by L-BFGS-B.
+
+\paragraph{Optimized parameters.}
+Table~\ref{tab:qsp_params_supp} records the optimized rotation angles and axis
+phases for the white-noise-optimized QSP sequences ($T=2\pi$,
+$\Omega_{\rm fast}=20\pi$~rad\,s$^{-1}$).
+Each noise model is optimized independently; Table~\ref{tab:qsp_params_supp} shows
+the white-noise winners, which are taken from the best result across both the
+$\omega_{\rm max}=50$~rad\,s$^{-1}$ and $\omega_{\rm max}=4\Omega_{\rm fast}\approx251$~rad\,s$^{-1}$
+optimization runs (each sequence re-evaluated with the larger bound before comparison).
+Unlike the QSP~$n{=}2$ double-$\pi$ reference, the $n{=}4,8,13$ sequences
+do not share a universal structure: the optimizer exploits all available phase
+and amplitude degrees of freedom to suppress broadband noise.
+
+\begin{table*}[t]
+\caption{Optimized pulsed QSP parameters (white noise, $T=2\pi$,
+$\Omega_{\rm fast}=20\pi$~rad\,s$^{-1}$, $\omega_{\min}=2\pi/T$).
+Listed are the best-of-two-runs sequences (see text).
+Each noise model yields a distinct optimized sequence; parameters for all
+noise types are provided in the supplemental code.
+$\sigma^2_\nu$ values match Table~I of the main text.}
+\label{tab:qsp_params_supp}
+\begin{ruledtabular}
+\begin{tabular}{cllll}
+$n$ & $\tau_{\rm free}$~(s) & $\boldsymbol{\theta}/\pi$ & $\boldsymbol{\phi}$~(rad)
+    & $\sigma^2_\nu$ (white) \\
+\hline
+4 & 2.063
+  & $[0.414,\;0.414,\;0.445,\;0.602]$
+  & $[2.989,\;2.833,\;2.062,\;3.515]$
+  & $4.82\times10^{-3}$ \\[3pt]
+8 & 0.881
+  & $[0.358,\;0.185,\;0.327,\;0.146,$
+  & $[3.381,\;3.234,\;2.904,\;4.508,$
+  & $2.36\times10^{-3}$ \\
+  &
+  & $\phantom{[}0.149,\;0.542,\;0.176,\;0.403]$
+  & $\phantom{[}0.211,\;3.174,\;2.988,\;2.695]$
+  & \\[3pt]
+13 & 0.506
+   & $[0.402,\;1.000,\;0.185,\;0.202,\;0.170,$
+   & $[2.692,\;1.679,\;2.419,\;4.405,\;2.762,$
+   & $1.99\times10^{-3}$ \\
+   &
+   & $\phantom{[}0.029,\;0.011,\;0.266,\;0.081,\;0.147,$
+   & $\phantom{[}4.798,\;3.544,\;3.240,\;3.082,\;4.005,$
+   & \\
+   &
+   & $\phantom{[}0.712,\;0.582,\;0.335]$
+   & $\phantom{[}5.411,\;3.100,\;5.083]$
+   & \\
+\end{tabular}
+\end{ruledtabular}
+\end{table*}
+
+\paragraph{Double-$\pi$ interpretation.}
+The QSP $n{=}2$ reference uses the double-$\pi$ structure
+$\theta=[\pi,\pi]$, $\phi=[0,0]$, which achieves maximum DC sensitivity.
+The first $\pi$-pulse maps $|g\rangle\to|e\rangle$ in the probe subspace,
+placing the system entirely in the excited state for the full free-evolution duration.
+The noise Hamiltonian $H_\delta = \delta|e\rangle\langle e|$ then accumulates a
+complete phase $\delta\tau_{\rm free}\approx\delta T$ on $|e\rangle$,
+versus the half-phase $\delta T/2$ acquired by the equatorial superposition in
+standard Ramsey spectroscopy.
+The final $\pi$-pulse maps $|e\rangle$ back toward $|g\rangle$ to close the sequence.
+This gives $\mathcal{F}_e(0)\approx T^2$, providing $4\times$ higher DC
+sensitivity than continuous-drive three-level protocols.
+The optimized $n{=}4,8,13$ sequences intentionally break this double-$\pi$ structure
+to redistribute filter-function weight away from low frequencies,
+trading some DC sensitivity for reduced noise variance $\mathcal{V}$.
+
+
+       % ============================================================
+       \section{Pulse Shaping: Extended Calculations}
+       \label{supp:pulseshaping_ext}
+       % ============================================================
+
+       \subsection*{SVII.1 Modified recurrences for general pulse shapes}
+
+       For a segment $j$ with general Rabi envelope $\Omega_j(t)$ and constant phase $\phi_j$,     
+       the Hamiltonian $H_j = (\Omega_j(t)/2)(\cos\phi_j\,\sigma_x+\sin\phi_j\,\sigma_y)$
+       generates a single-axis rotation whose accumulated angle is the cumulative pulse area       
+       \be
+         h_j(t) \equiv \int_{t_{j-1}}^{t}\Omega_j(t')\,dt'\,.
+       \ee
+       The SU(2) propagator from $t_{j-1}$ to $t$ is
+       $e^{-ih_j(t)/2\,(\cos\phi_j\,\sigma_x+\sin\phi_j\,\sigma_y)}$,
+       so the amplitudes satisfy the same recurrence as for square pulses
+       with $\theta_j(t)\to h_j(t)$:
+       \begin{align}
+         F_j(t) &= \cos\tfrac{h_j(t)}{2}\,f_{j-1} -
+       e^{-i\phi_j}\sin\tfrac{h_j(t)}{2}\,g_{j-1}^*\,, \\
+         G_j(t) &= \cos\tfrac{h_j(t)}{2}\,g_{j-1} +
+       e^{-i\phi_j}\sin\tfrac{h_j(t)}{2}\,f_{j-1}^*\,.
+       \end{align}
+       The endpoint values $f_j \equiv F_j(t_j)$, $g_j \equiv G_j(t_j)$ depend only on
+       the total rotation angle $\Theta_j = h_j(t_j) = \int_{t_{j-1}}^{t_j}\Omega_j\,dt$
+       and the phase $\phi_j$, not on the pulse shape.
+
+       \subsection*{SVII.2 Segment contribution $\Phi_j(\omega)$ for general envelopes}
+
+       Expanding $F_j^*(t)G_j(t)$ using the recurrence:
+       \begin{align}
+         F_j^*(t) &= \cos\tfrac{h_j}{2}\,f_{j-1}^* - e^{i\phi_j}\sin\tfrac{h_j}{2}\,g_{j-1}\,,     
+        \\
+         G_j(t)   &= \cos\tfrac{h_j}{2}\,g_{j-1}   +
+       e^{-i\phi_j}\sin\tfrac{h_j}{2}\,f_{j-1}^*\,.
+       \end{align}
+       Multiplying and using $\cos^2(x/2)-\sin^2(x/2)=\cos x$, $2\cos(x/2)\sin(x/2)=\sin x$,
+       and defining the shorthand
+       $\mathcal{A}_j \equiv e^{-i\phi_j}(f_{j-1}^*)^2 - e^{i\phi_j}g_{j-1}^2$:
+       \be
+         F_j^*(t)G_j(t) = \cos h_j(t)\,\varphi_{j-1}
+           + \tfrac{\mathcal{A}_j}{2}\,\sin h_j(t)\,,
+       \ee
+       where $\varphi_{j-1}=f_{j-1}^*g_{j-1}$.  Substituting $s=t-t_{j-1}$ and integrating:
+       \begin{align}
+         \Phi_j(\omega) &= \int_{t_{j-1}}^{t_j}F_j^*(t)G_j(t)\,e^{-i\omega t}\,dt \\
+         &= e^{-i\omega t_{j-1}}\!\left[
+           \varphi_{j-1}\,\tilde{I}_c^{(j)}(\omega)
+           + \tfrac{\mathcal{A}_j}{2}\,\tilde{I}_s^{(j)}(\omega)
+         \right]\!,
+       \end{align}
+       with
+       \begin{align}
+         \tilde{I}_c^{(j)}(\omega) &= \int_0^{\tau_j}\cos h_j(s)\,e^{-i\omega s}\,ds\,, \\
+         \tilde{I}_s^{(j)}(\omega) &= \int_0^{\tau_j}\sin h_j(s)\,e^{-i\omega s}\,ds\,,
+       \end{align}
+       so that $\tilde{I}_c^{(j)}+i\,\tilde{I}_s^{(j)} = \tilde{e}_j^+(\omega) \equiv
+       \int_0^{\tau_j}e^{ih_j(s)-i\omega s}\,ds$.
+       The full filter integral is $\Phi(\omega)=\sum_j\Phi_j(\omega)$.
+
+       \subsection*{SVII.3 Raised-cosine: Jacobi--Anger expansion}
+
+       For the raised-cosine envelope with total rotation $\Theta_j$ over duration $\tau_j$,       
+       \be
+         \Omega_j(s) = \frac{\Theta_j}{\tau_j}\!\left[1-\cos\!\frac{2\pi s}{\tau_j}\right],        
+         \label{eq:RC_def}
+       \ee
+       the cumulative area is
+       \be
+         h_j(s) = \frac{\Theta_j}{\tau_j}s - \frac{\Theta_j}{2\pi}\sin\!\frac{2\pi
+       s}{\tau_j}\,.
+       \ee
+       Writing $e^{ih_j(s)} = e^{i(\Theta_j/\tau_j)s}\cdot e^{-i(\Theta_j/2\pi)\sin(2\pi
+       s/\tau_j)}$
+       and applying the Jacobi--Anger expansion
+       $e^{iz\sin\psi}=\sum_{n=-\infty}^{\infty}J_n(z)e^{in\psi}$
+       with $z=\Theta_j/(2\pi)$ and $\psi=2\pi s/\tau_j$:
+       \be
+         e^{ih_j(s)} = \sum_{n=-\infty}^{\infty}J_n\!\!\left(\frac{\Theta_j}{2\pi}\right)
+           \exp\!\!\left[i\!\left(\frac{\Theta_j}{2\pi}-n\right)\!\omega_R s\right]\!,
+       \ee
+       where $\omega_R=2\pi/\tau_j$.  Integrating term by term:
+       \begin{align}
+         \tilde{e}_j^+(\omega) &=
+       \tau_j\sum_{n=-\infty}^{\infty}J_n\!\!\left(\frac{\Theta_j}{2\pi}\right)
+           \frac{\sin\xi_n^{(j)}}{\xi_n^{(j)}}\,e^{i\xi_n^{(j)}}\,,
+         \label{eq:eplus_exact}
+       \end{align}
+       where $\xi_n^{(j)} = \bigl[(\Theta_j/2\pi - n)\omega_R - \omega\bigr]\tau_j/2$,
+       with $\sin\xi/\xi \equiv 1$ at $\xi=0$.
+       The real and imaginary parts give $\tilde{I}_c^{(j)}$ and $\tilde{I}_s^{(j)}$
+       respectively.
+
+       For a full half-cycle ($\Theta_j=\pi$): $J_n(1/2)$ with dominant terms
+       $J_0(1/2)\approx 0.938$ (peak at $\omega=\omega_R/2$) and
+       $J_{\pm 1}(1/2)\approx \pm 0.242$ (peaks at $\omega=\mp\omega_R/2$).
+
+       \subsection*{SVII.4 Roll-off proof: probe and clock channels}
+
+       \paragraph{Probe channel ($|\Phi|^2\sim\omega^{-6}$).}
+       The function $\sin h_j(s)$ satisfies:
+       \begin{itemize}
+         \item $\sin h_j(0) = 0$ and $\sin h_j(\tau_j) = \sin\Theta_j$;
+         \item $\tfrac{d}{ds}\sin h_j = \Omega_j(s)\cos h_j$:
+               vanishes at $s=0$ and $s=\tau_j$ since $\Omega_j(0)=\Omega_j(\tau_j)=0$;
+         \item $\tfrac{d^2}{ds^2}\sin h_j = \dot\Omega_j\cos h_j - \Omega_j^2\sin h_j$:
+               also vanishes at the boundaries since $\dot\Omega_j(0)=\dot\Omega_j(\tau_j)=0$      
+               for the raised-cosine.
+       \end{itemize}
+       Applying integration by parts three times to $\tilde{I}_s^{(j)}(\omega)$, each time the     
+       boundary term vanishes, leaving
+       \be
+         \tilde{I}_s^{(j)}(\omega) = \frac{1}{(i\omega)^3}\int_0^{\tau_j}
+           \frac{d^3}{ds^3}\!\left[\sin h_j(s)\right]e^{-i\omega s}\,ds\,.
+       \ee
+       The third derivative $\ddot\Omega_j\cos h_j - 3\Omega_j\dot\Omega_j\sin h_j -
+       \Omega_j^3\cos h_j$
+       is bounded, so $|\tilde{I}_s^{(j)}(\omega)|\leq C/\omega^3$
+       and $\mathcal{F}_e^{\rm probe}=\tfrac{1}{2}|\Phi|^2\sim\omega^{-6}$.
+       For comparison, a square envelope has $\Omega_j(0^+)\neq 0$: only one IBP is possible,      
+       giving $|\tilde{I}_s|\leq C'/\omega$ and $\mathcal{F}_e^{\rm probe}\sim\omega^{-4}$.        
+
+       \paragraph{Clock channel for GPS-$m$ (single segment, $\Theta=2\pi m$).}
+       For GPS-$m$, the integer-rotation condition $\Theta=2\pi m$ ensures
+       $G(0)=G(T)=0$, so $|G(t)|^2$ vanishes at both endpoints.
+       Moreover $\partial_t|G|^2\big|_{0,T}=\sin\theta\cdot\Omega/2\big|_{0,T}=0$
+       (since $\sin(0)=\sin(2\pi m)=0$), so the boundary smoothness of $|G|^2$
+       is governed solely by higher derivatives of $\Omega(t)$.
+       For a square envelope, $\partial_t^2|G|^2\big|_0 = \Omega^2/2\neq 0$,
+       giving $n=2$ vanishing derivatives and $\mathcal{F}_e\sim\omega^{-4}$.
+       For a raised-cosine envelope ($\Omega(0)=\Omega(T)=0$), the cumulative area
+       satisfies $\theta(t)\sim t^3$ near $t=0$, giving $|G|^2=\sin^2(\theta/2)\sim t^6$,
+       hence $n=6$ vanishing derivatives and
+       \be
+         \mathcal{F}_e^{\rm GPS,RC}(\omega)\sim\omega^{-12}\,.
+       \ee
+
+       \paragraph{Clock channel for multi-segment sequences ($\Theta_j\neq 2\pi k$).}
+       For general multi-segment sequences where individual pulse rotations $\Theta_j$
+       are not integer multiples of $2\pi$, $|G(t_j)|^2=\sin^2(\Theta_j/2)\neq 0$
+       at segment endpoints, creating jump discontinuities in $|G(t)|^2$.
+       This gives $|\mathcal{X}(\omega)|\sim\omega^{-1}$
+       and $\mathcal{F}_e^{\rm clock}\sim\omega^{-2}$, independent of pulse shaping.
+       Arranging $\Theta_j=2\pi k$ (complete Rabi cycles) removes these jumps and
+       restores the GPS-$m$ roll-off behavior.
+
+       \subsection*{SVII.5 GPS $m=1$: clock-channel filter function}
+
+       For GPS $m=1$ ($\Theta=2\pi$, square envelope, $\delta=0$):
+       \begin{align}
+         F(t) &= \cos\tfrac{\Omega t}{2}\,,\quad G(t) = -i\sin\tfrac{\Omega t}{2}\,, \\
+         |G(t)|^2 &= \sin^2\!\tfrac{\Omega t}{2} = \tfrac{1}{2}[1-\cos(\Omega t)]\,.
+       \end{align}
+       The clock-channel path function $\chi(t)=|G(t)|^2$ is a finite Fourier series
+       with content only at $k=0$ and $k=\pm 1$.
+       Evaluating $\mathcal{X}(\omega)=\int_0^T\chi(t)e^{-i\omega t}\,dt$:
+       \begin{align}
+         \mathcal{X}(\omega) &= \frac{T}{2}\,\mathrm{sinc}\!\left(\frac{\omega T}{2}\right)
+           e^{-i\omega T/2} \nonumber\\
+           &\quad - \frac{T}{4}\!\left[\mathrm{sinc}\!\left(\frac{(\omega-\Omega)T}{2}\right)
+             e^{-i(\omega-\Omega)T/2}
+             + (\Omega\to{-\Omega})\right]\!,
+         \label{eq:chi_GPS_sq}
+       \end{align}
+       where $T=2\pi/\Omega$ for GPS $m=1$ (one complete Rabi cycle).
+       The filter function $\mathcal{F}_e=|\mathcal{X}(\omega)|^2$ has spectral support
+       concentrated near $\omega=0$ and $\omega=\pm\Omega$; for $\omega\gg\Omega$ all
+       sinc envelopes decay as $\omega^{-1}$, giving
+       $\mathcal{F}_e\sim\omega^{-4}$ (consistent with the square-envelope roll-off of Sec.~SIII).
+       In particular, $|\mathcal{X}(\omega)|$ is extremely small for $\omega\gtrsim 2\Omega$
+       because the spectral content of $\chi(t)$ is confined to harmonics $k=0,1$;
+       this is the origin of the high-pass noise suppression described in the main text.
+
+       For the raised-cosine GPS $m=1$ envelope (Eq.~\eqref{eq:RC_def} with $\Theta_j=2\pi$),
+       $|G(t)|^2=\sin^2(h(t)/2)$ inherits the $\sim t^6$ boundary behavior, and
+       $\mathcal{F}_e\sim\omega^{-12}$ as established in Sec.~SIII and SVII.4.
+
+       \subsection*{SVII.6 Gradient backpropagation through the CK recurrence}
+
+       For gradient-based optimization of shaped-pulse sequences, the gradient
+       $\partial\mathcal{C}/\partial\lambda_k$ (where $\lambda_k$ is any envelope parameter)       
+       is computed via backpropagation:
+       \begin{enumerate}
+         \item \emph{Forward pass}: propagate $(F_j, G_j)$ via the recurrence to obtain
+               $\Phi(\omega_j)$, $\mathcal{X}(\omega_j)$ at all grid frequencies.
+         \item \emph{Loss}: $\mathcal{C} = \sum_j w_j S(\omega_j)[\tfrac{1}{2}|\Phi_j|^2 +
+       |\mathcal{X}_j|^2]$,
+               $w_j = \Delta\omega/(2\pi)$.
+         \item \emph{Backward pass}: adjoint recurrence for $\partial\mathcal{C}/\partial F_j$     
+               and $\partial\mathcal{C}/\partial G_j$, then chain rule to
+       $\partial\mathcal{C}/\partial\lambda_k$.
+       \end{enumerate}
+       In the current implementation, gradients are estimated by central finite differences        
+       ($\epsilon=10^{-5}$), which is adequate for L-BFGS-B convergence.
+
+
+% ============================================================
+\section{Two-Level Reduction}
+\label{supp:two_level_reduction}
+% ============================================================
+
+Setting $|m\rangle \equiv |e\rangle$, $\beta_m \equiv \beta_e$, and taking
+$M = \sigma_z^{ge}$ (so $m_z=1$, $m_x=m_y=0$) gives the standard qubit filter function:
+\be
+  \mathcal{F}^{(2L)}(\omega) = |\Phi(\omega)|^2\,,
+\ee
+where $\Phi(\omega) = \int_0^T F^*(t)G(t)\,e^{-i\omega t}\,dt$.
+For a Ramsey interval ($\pi/2$--$\tau$--$\pi/2$ in the instantaneous limit),
+$F^*(t)G(t) = (i/2)\sin(\omega_0\tau)\Theta(\tau<t<T-\tau)$ reduces to the standard result
+$\mathcal{F}^{(2L)}_{\rm Ramsey}(\omega) = 4\sin^2(\omega T/2)/\omega^2$.
+
+
+% ============================================================
+\section{Filter Functions for Standard Sequences}
+\label{supp:filter_functions}
+% ============================================================
+
+\subsection*{SIX.1 Ramsey sequence}
+
+For two instantaneous $\pi/2$ pulses:
+\be
+  \mathcal{F}_{\rm Ramsey}(\omega) = \frac{4\sin^2(\omega T/2)}{\omega^2}\,.
+\ee
+
+\subsection*{SIX.2 CPMG sequence ($n$ pulses, spacing $\tau$)}
+
+Instantaneous pulses:
+\be
+  \mathcal{F}_{\rm CPMG}(\omega) = \frac{4}{\omega^2}
+    \tan^2\!\left(\frac{\omega\tau}{2}\right)\sin^2\!\left(\frac{\omega n\tau}{2}\right)\,.
+\ee
+
+\subsection*{SIX.3 GPS $m$-cycle sequence}
+
+GPS-$m$ is a single continuous drive completing $m$ full Rabi cycles ($\Omega T = 2\pi m$),
+so $G(T)=\sin(\pi m)=0$ and the filter function is entirely in the clock channel:
+\be
+  \mathcal{F}_e^{\rm GPS}(\omega) = |\mathcal{X}(\omega)|^2\,,\quad
+  \mathcal{X}(\omega) = \int_0^T|G(t)|^2 e^{-i\omega t}\,dt\,.
+\ee
+At $\delta=0$, $|G(t)|^2=\sin^2(\Omega t/2)$ (square envelope), which is a two-term
+Fourier series with spectral content at $k=0$ and $k=\pm 1$ only
+(Sec.~\ref{supp:pulseshaping_ext}, SVII.5).
+The closed-form $\mathcal{X}(\omega)$ is given by Eq.~\eqref{eq:chi_GPS_sq}.
+For large $\omega$, $\mathcal{F}_e^{\rm GPS}\sim\omega^{-4}$ (square envelope)
+and $\mathcal{F}_e^{\rm GPS}\sim\omega^{-12}$ (raised-cosine envelope).
+
+\subsection*{SIX.4 Roll-off behavior and pulse smoothness}
+
+The high-frequency decay of $\mathcal{F}_e(\omega)$ depends on which channel
+contributes.  For sequences with $G(T)\neq 0$ (general pulsed QSP), both channels
+are present; for sequences with $G(T)=0$ (GPS-$m$, Ramsey, equiangular) only the
+clock channel $|\mathcal{X}|^2$ contributes.
+
+The probe and clock channel roll-off exponents are given by Tables~\ref{tab:rolloff_probe}
+and~\ref{tab:rolloff_clock} in Sec.~SIII.2, and summarised for GPS envelopes in
+Table~III of the main text.
+
+For standard equiangular sequences (piecewise-constant $\Omega$, $G(T)\neq 0$ in general),
+$F^*(t)G(t)$ has discontinuous first derivatives at pulse boundaries ($k=0$),
+giving $\omega^{-4}$ roll-off in the probe channel.
+
+
+% ============================================================
+\section{Temporal QSP Polynomial Recurrences}
+\label{supp:recurrences}
+% ============================================================
+
+During the $j$-th segment ($t_{j-1} < t \leq t_j$, Rabi frequency $\Omega_j$,
+phase $\phi_j$, duration $\tau_j$):
+\begin{align}
+  F_j(t) &= \cos\tfrac{\theta_j(t)}{2}\,f_{j-1} - e^{-i\phi_j}\sin\tfrac{\theta_j(t)}{2}\,g_{j-1}^*\,, \\
+  G_j(t) &= \cos\tfrac{\theta_j(t)}{2}\,g_{j-1} + e^{-i\phi_j}\sin\tfrac{\theta_j(t)}{2}\,f_{j-1}^*\,,
+\end{align}
+with $\theta_j(t) = \Omega_j(t-t_{j-1})$, $f_0 = 1$, $g_0 = 0$.
+The global amplitudes $F(t)$, $G(t)$ are assembled piecewise from these per-segment
+solutions; see the main text for the full piecewise construction.
+
+
+% ============================================================
+\section{SU(3) Extension}
+\label{supp:su3}
+% ============================================================
+
+For completeness, we record the SU(3) generalization of the Kubo variance,
+relevant for future extensions to multi-qutrit systems.
+
+The noise Hamiltonian in the Gell-Mann basis is $H(t) = \sum_a \beta_a(t)\lambda_a$ with
+$[\lambda_a,\lambda_b] = 2if_{abc}\lambda_c$.
+In the toggling frame of an $\mathrm{SU}(3)$ control propagator $U(t)$:
+\be
+  \tilde{H}(t) = \sum_{a,b}\beta_a(t)R_{ab}(t)\lambda_b\,,\quad
+  R_{ab}(t) = \tfrac{1}{2}\mathrm{Tr}(\lambda_a U^\dagger(t)\lambda_b U(t))\,.
+\ee
+For observable $M = \sum_c m_c\lambda_c$ and independent noise channels $S_{ab} = \delta_{ab}S_a$:
+\be
+  \langle\delta M^2\rangle = \frac{4}{\hbar^2}\sum_a\int\frac{d\omega}{2\pi}S_a(\omega)F_a(\omega)\,,
+\ee
+where
+\be
+  F_a(\omega) = \sum_{b,c,d}\left|\int_0^T dt\,R_{ab}(t)m_c f_{bcd}\,e^{-i\omega t}\right|^2\,.
+\ee
+This generalizes the $|\Phi(\omega)|^2$ structure of the two-level case to the full
+adjoint representation of $\mathrm{SU}(3)$.
+
+\bibliography{ref}
+\end{document}

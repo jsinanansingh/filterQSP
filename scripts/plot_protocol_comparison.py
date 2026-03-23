@@ -1,13 +1,21 @@
 """
-Filter function comparison: Ramsey, GPS m=1, equiangular N=4/8/16, QSP n=4/8/13.
+Filter function comparison: 2×2 grid, one panel per noise type + legend panel.
 
-One panel per noise spectrum (white, 1/f, high-pass).  For equiangular and
-QSP, each panel shows the sequence optimised for THAT noise model.
+Panels: white (top-left) | 1/f (top-right)
+        hp2 (bottom-left) | legend (bottom-right)
 
-Equiangular sequences are loaded from the newest equiangular_opt_cache_*.npz.
-QSP sequences are loaded from the newest qsp_opt_cache_*.npz.
+Each panel shows:
+  - Ramsey (grey dashed) — reference
+  - GPS m=1 (blue dash-dot) — reference
+  - Double-π QSP n=2 (purple dotted) — DC sensitivity reference
+  - Best equiangular for this noise type (orange)
+  - Best QSP for this noise type (dark blue)
+  - Noise PSD (grey fill, scaled for visibility)
 
-All protocols share total interrogation time T = 2*pi, delta=0.
+Sequences are loaded from the FL-cutoff (ω_min=2π/T, ramsey_normalized) caches
+that match Table I of the main text.
+
+All protocols: T=2π, δ=0.
 """
 
 import sys
@@ -42,58 +50,62 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
 T          = 2 * np.pi
 OMEGA_FAST = 20 * np.pi
 N_FFT      = 4096
-OMEGA_PLOT = np.logspace(-2, np.log10(30), 800)
-OMEGA_MIN  = 2.0 * np.pi / T
+OMEGA_PLOT = np.logspace(-1, np.log10(30), 800)  # ω from 0.1 to 30
+OMEGA_MIN  = 2 * np.pi / T                        # Fourier-limit cutoff
 
-OMEGA_GPS1 = 2 * np.pi * 1 / T   # = 1.0
+OMEGA_GPS1 = 2 * np.pi * 1 / T  # = 1.0
 
-OUTPUT_DIR   = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
-CACHE_DIR    = OUTPUT_DIR
-EQ_PREFIX    = 'equiangular_opt_cache'
-QSP_PREFIX   = 'qsp_opt_cache'
+OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 
-# Noise panels: (eq_cache_key, qsp_noise_label, panel_title, S_func)
-# eq_cache_key  matches keys in equiangular cache: 'white', '1f', 'highpass2'
-# qsp_noise_label is what run_optimization.py used as nlabel (pre-sanitize)
-NOISE_PANELS = [
-    ('white',     'White',             'White noise',              white_noise_psd()),
-    ('1f',        '1/f',              r'$1/f$ noise',              one_over_f_psd()),
-    ('highpass2', 'High-pass (w_c=2)', r'High-pass ($\omega_c=2$)', high_pass_psd(omega_c=2.0)),
-]
+# FL-cutoff caches (match Table I of the main text)
+# equiangular: 20260320 run (more seeds, confirmed identical to 20260317)
+# QSP: 20260320 definitive run (omega_max=4*omega_fast=251 rad/s, n=[4,8,13,16])
+EQ_CACHE_PATH  = OUTPUT_DIR / 'equiangular_opt_cache_20260320_115752.npz'
+QSP_CACHE_PATH = OUTPUT_DIR / 'qsp_opt_cache_20260320_170624.npz'
 
-EQ_NS   = [4, 8, 16]
-QSP_NS  = [4, 8, 13]
+EQ_NS  = [4, 8, 16]
+QSP_NS = [4, 8, 13]
 
-# Color scheme
-COLOR_RAMSEY = '0.45'
-COLOR_GPS1   = 'C0'
-EQ_COLORS    = ['#E07020', '#C04000', '#802000']   # orange → dark brown
-QSP_COLORS   = ['#2090D0', '#1060A0', '#083070']   # light → dark blue
-
-
-# =============================================================================
-# Cache helpers
-# =============================================================================
 
 def find_latest_equiangular_cache():
-    """Return the newest timestamped equiangular cache, or a legacy path."""
-    matches = sorted(CACHE_DIR.glob(f'{EQ_PREFIX}_*.npz'))
-    if matches:
-        return matches[-1]
-    legacy = CACHE_DIR / f'{EQ_PREFIX}.npz'
-    if legacy.exists():
-        return legacy
-    return None
+    """Return the equiangular cache path used by this script (for import by other scripts)."""
+    return EQ_CACHE_PATH if EQ_CACHE_PATH.exists() else None
 
+# Noise panels: (eq_cache_key, qsp_cache_key, panel_title, S_func)
+# Keys must match those actually stored in the respective caches.
+NOISE_PANELS = [
+    ('white',      'White',           'White noise',              white_noise_psd()),
+    ('1f',         '1ff',            r'$1/f$ noise',              one_over_f_psd()),
+    ('highpass2',  'High-pass_w_c2', r'High-pass ($\omega_c=2$)', high_pass_psd(omega_c=2.0)),
+]
 
-def find_latest_qsp_cache():
-    """Return the newest timestamped QSP cache, or None."""
-    matches = sorted(CACHE_DIR.glob(f'{QSP_PREFIX}_*.npz'))
-    return matches[-1] if matches else None
+# --- PRA-standard plot style -------------------------------------------------
+matplotlib.rcParams.update({
+    'font.family':        'serif',
+    'font.size':           8,
+    'axes.labelsize':      9,
+    'axes.titlesize':      8,
+    'xtick.labelsize':     7,
+    'ytick.labelsize':     7,
+    'legend.fontsize':     7,
+    'legend.framealpha':  0.9,
+    'legend.edgecolor':   '0.7',
+    'lines.linewidth':     1.4,
+    'axes.linewidth':      0.6,
+    'xtick.major.width':   0.6,
+    'ytick.major.width':   0.6,
+    'xtick.minor.width':   0.4,
+    'ytick.minor.width':   0.4,
+    'xtick.direction':    'in',
+    'ytick.direction':    'in',
+})
 
-
-def _sanitize(label):
-    return label.replace('/', 'f').replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
+# Colour scheme
+COLOR_RAMSEY   = '0.45'         # grey
+COLOR_GPS1     = '#2166AC'      # steel blue
+COLOR_DPI      = '#9B30FF'      # purple — double-π reference
+COLOR_EQ_BEST  = '#D94F00'      # burnt orange
+COLOR_QSP_BEST = '#0A3D6B'      # dark navy
 
 
 # =============================================================================
@@ -118,9 +130,12 @@ def build_gps(system, omega):
     return seq
 
 
+def build_double_pi(system):
+    return build_qsp_3level(system, T, 2, [np.pi, np.pi], [0.0, 0.0], OMEGA_FAST)
+
+
 def build_equiangular(system, omega, phases):
-    N   = len(phases)
-    tau = T / N
+    tau = T / len(phases)
     seq = MultiLevelPulseSequence(system, system.probe)
     for phi in phases:
         seq.add_continuous_pulse(omega, [np.cos(phi), np.sin(phi), 0.0], 0.0, tau)
@@ -141,12 +156,14 @@ def get_filter(seq):
     return sens_sq, freqs_plot, Fe_plot, freqs_fft, Fe_fft
 
 
-def noise_var(freqs_fft, Fe_fft, S_func):
+def sigma_nu(res, S_func):
+    sens_sq, _, _, freqs_fft, Fe_fft = res
     mask = freqs_fft >= OMEGA_MIN
-    if np.count_nonzero(mask) < 2:
-        return 0.0
-    return float(simpson(Fe_fft[mask] * S_func(freqs_fft[mask]),
-                         x=freqs_fft[mask]) / (2 * np.pi))
+    if np.count_nonzero(mask) < 2 or sens_sq < 1e-20:
+        return np.inf
+    nv = float(simpson(Fe_fft[mask] * S_func(freqs_fft[mask]),
+                       x=freqs_fft[mask]) / (2 * np.pi))
+    return nv / sens_sq
 
 
 # =============================================================================
@@ -158,140 +175,130 @@ def main():
     system = ThreeLevelClock()
 
     # ── Load caches ───────────────────────────────────────────────────────────
-    eq_cache_path = find_latest_equiangular_cache()
-    if eq_cache_path is None:
-        raise FileNotFoundError(
-            f'No equiangular cache found. Run scripts/run_equiangular_optimization.py first.'
-        )
-    eq_cache = np.load(str(eq_cache_path), allow_pickle=True)
-    print(f'Equiangular cache: {eq_cache_path}')
+    if not EQ_CACHE_PATH.exists():
+        raise FileNotFoundError(f'Equiangular cache not found: {EQ_CACHE_PATH}')
+    eq_cache  = np.load(str(EQ_CACHE_PATH),  allow_pickle=True)
+    qsp_cache = np.load(str(QSP_CACHE_PATH), allow_pickle=True) \
+                if QSP_CACHE_PATH.exists() else None
+    print(f'Equiangular cache: {EQ_CACHE_PATH.name}')
+    print(f'QSP cache:         {QSP_CACHE_PATH.name if QSP_CACHE_PATH.exists() else "none"}')
 
-    qsp_cache_path = find_latest_qsp_cache()
-    qsp_cache = None
-    if qsp_cache_path is not None:
-        qsp_cache = np.load(str(qsp_cache_path), allow_pickle=True)
-        print(f'QSP cache:         {qsp_cache_path}')
-    else:
-        print('WARNING: No QSP cache found — QSP curves will be omitted.')
+    # ── Reference sequences (noise-independent) ───────────────────────────────
+    print('\nBuilding reference sequences ...')
+    res_ramsey = get_filter(build_ramsey(system))
+    res_gps1   = get_filter(build_gps(system, OMEGA_GPS1))
+    res_dpi    = get_filter(build_double_pi(system))
 
-    # ── Build noise-independent sequences ─────────────────────────────────────
-    print('\nBuilding Ramsey and GPS m=1 ...')
-    seq_ramsey = build_ramsey(system)
-    seq_gps1   = build_gps(system, OMEGA_GPS1)
-
-    res_ramsey = get_filter(seq_ramsey)
-    res_gps1   = get_filter(seq_gps1)
-
-    # ── Build per-noise sequences and evaluate ────────────────────────────────
-    # panel_data[panel_idx] = {label: (sens_sq, freqs_plot, Fe_plot, freqs_fft, Fe_fft)}
-    panel_seqs = []   # list of dicts per panel
-
-    for eq_key, qsp_nlabel, panel_title, S_func in NOISE_PANELS:
-        seqs = {}
-
-        # Equiangular: load noise-specific result
+    # ── Per-noise sequences: pick best by σ²_ν ───────────────────────────────
+    panel_data = []
+    for eq_key, qsp_key, panel_title, S_func in NOISE_PANELS:
+        # Best equiangular
+        eq_best_res, eq_best_snu, eq_best_N = None, np.inf, None
         for N in EQ_NS:
             pk = f'eq_N{N}_{eq_key}'
+            if f'{pk}_omega' not in eq_cache:
+                continue
             omega  = float(eq_cache[f'{pk}_omega'])
             phases = np.asarray(eq_cache[f'{pk}_phases'], dtype=float)
-            seq    = build_equiangular(system, omega, phases)
-            seqs[f'Eq N={N}'] = get_filter(seq)
+            res    = get_filter(build_equiangular(system, omega, phases))
+            snu    = sigma_nu(res, S_func)
+            if snu < eq_best_snu:
+                eq_best_snu, eq_best_res, eq_best_N = snu, res, N
 
-        # QSP: load noise-specific result
+        # Best QSP
+        qsp_best_res, qsp_best_snu, qsp_best_n = None, np.inf, None
         if qsp_cache is not None:
             for n in QSP_NS:
-                k = f'qsp_n{n}_{_sanitize(qsp_nlabel)}'
+                k = f'qsp_n{n}_{qsp_key}'
                 if f'{k}_thetas' not in qsp_cache:
                     continue
-                thetas     = qsp_cache[f'{k}_thetas']
-                phis       = qsp_cache[f'{k}_phis']
-                omega_fast = float(qsp_cache[f'{k}_omega_fast'])
-                seq        = build_qsp_3level(system, T, n, thetas, phis, omega_fast)
-                seqs[f'QSP n={n}'] = get_filter(seq)
+                seq = build_qsp_3level(system, T, n,
+                                       qsp_cache[f'{k}_thetas'],
+                                       qsp_cache[f'{k}_phis'],
+                                       float(qsp_cache[f'{k}_omega_fast']))
+                res = get_filter(seq)
+                snu = sigma_nu(res, S_func)
+                if snu < qsp_best_snu:
+                    qsp_best_snu, qsp_best_res, qsp_best_n = snu, res, n
 
-        panel_seqs.append(seqs)
+        panel_data.append({
+            'eq_res': eq_best_res,  'eq_N':  eq_best_N,
+            'qsp_res': qsp_best_res, 'qsp_n': qsp_best_n,
+            'S_func': S_func,       'title': panel_title,
+        })
+        print(f'  [{eq_key}]  best Eq N={eq_best_N} σ²_ν={eq_best_snu:.3e}'
+              f'  |  best QSP n={qsp_best_n} σ²_ν={qsp_best_snu:.3e}')
 
-    # ── Print summary table ───────────────────────────────────────────────────
-    noise_labels = [title for _, _, title, _ in NOISE_PANELS]
-    S_funcs      = [S     for _, _, _, S    in NOISE_PANELS]
-    print()
-    col = 14
-    hdr = f'{"Protocol":<22}' + ''.join(f'{"sens_sq":>{col}}') + \
-          ''.join(f'{f"snu_{eq_key}":>{col}}' for eq_key, *_ in NOISE_PANELS)
-    print(hdr);  print('-' * len(hdr))
+    # ── Figure: 2×2 grid (3 noise panels + legend panel) ─────────────────────
+    fig, axes = plt.subplots(2, 2, figsize=(7.0, 5.4),
+                             constrained_layout=True)
 
-    def print_row(label, sens_sq, fft_data):
-        freqs_fft, Fe_fft = fft_data
-        row = f'{label:<22}{sens_sq:>{col}.4f}'
-        for _, _, _, S_func in NOISE_PANELS:
-            nv  = noise_var(freqs_fft, Fe_fft, S_func)
-            snu = nv / sens_sq if (sens_sq > 0 and nv > 0) else 0.0
-            row += f'{snu:>{col}.4f}'
-        print(row)
+    panel_axes = [axes[0, 0], axes[0, 1], axes[1, 0]]
+    legend_ax  = axes[1, 1]
 
-    print_row('Ramsey',   res_ramsey[0], (res_ramsey[3], res_ramsey[4]))
-    print_row('GPS m=1',  res_gps1[0],   (res_gps1[3],   res_gps1[4]))
-    for i, (eq_key, *_) in enumerate(NOISE_PANELS):
-        for N in EQ_NS:
-            r = panel_seqs[i][f'Eq N={N}']
-            print_row(f'Eq N={N} [{eq_key}]', r[0], (r[3], r[4]))
-        for n in QSP_NS:
-            if f'QSP n={n}' in panel_seqs[i]:
-                r = panel_seqs[i][f'QSP n={n}']
-                print_row(f'QSP n={n} [{eq_key}]', r[0], (r[3], r[4]))
-        break  # one pass is enough for the table; noise-specific results printed below
+    for ax, (_, _, _, S_func), pd in zip(panel_axes, NOISE_PANELS, panel_data):
 
-    # ── Figure: 1 row × 3 panels ─────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.2), constrained_layout=True,
-                             sharey=True)
+        # Reference curves
+        l_ramsey, = ax.loglog(res_ramsey[1], res_ramsey[2] / T**2 + 1e-20,
+                              color=COLOR_RAMSEY, lw=1.8, ls='--', zorder=3)
+        l_gps1, = ax.loglog(res_gps1[1], res_gps1[2] / T**2 + 1e-20,
+                            color=COLOR_GPS1, lw=1.8, ls='-.', zorder=3)
+        l_dpi, = ax.loglog(res_dpi[1], res_dpi[2] / T**2 + 1e-20,
+                           color=COLOR_DPI, lw=1.5, ls=':', zorder=3)
 
-    for ax, (eq_key, qsp_nlabel, panel_title, S_func), seqs in zip(axes, NOISE_PANELS, panel_seqs):
+        # Best equiangular
+        l_eq = None
+        if pd['eq_res'] is not None:
+            r = pd['eq_res']
+            l_eq, = ax.loglog(r[1], r[2] / T**2 + 1e-20,
+                              color=COLOR_EQ_BEST, lw=2.0, ls='-', zorder=4)
 
-        # Ramsey and GPS (same in every panel)
-        ax.loglog(res_ramsey[1], res_ramsey[2] / T**2 + 1e-20,
-                  color=COLOR_RAMSEY, lw=2.0, ls='--', label='Ramsey', zorder=3)
-        ax.loglog(res_gps1[1],   res_gps1[2]   / T**2 + 1e-20,
-                  color=COLOR_GPS1,   lw=2.0, ls='-.', label=r'GPS $m{=}1$', zorder=3)
+        # Best QSP
+        l_qsp = None
+        if pd['qsp_res'] is not None:
+            r = pd['qsp_res']
+            l_qsp, = ax.loglog(r[1], r[2] / T**2 + 1e-20,
+                               color=COLOR_QSP_BEST, lw=2.0, ls='-', zorder=4)
 
-        # Equiangular (noise-specific)
-        for N, color in zip(EQ_NS, EQ_COLORS):
-            r = seqs[f'Eq N={N}']
-            ax.loglog(r[1], r[2] / T**2 + 1e-20,
-                      color=color, lw=2.2, ls='-',
-                      label=rf'Eq $N{{\!=\!}}{N}$', zorder=4)
-
-        # QSP (noise-specific)
-        for n, color in zip(QSP_NS, QSP_COLORS):
-            if f'QSP n={n}' not in seqs:
-                continue
-            r = seqs[f'QSP n={n}']
-            ax.loglog(r[1], r[2] / T**2 + 1e-20,
-                      color=color, lw=2.2, ls='-',
-                      label=rf'QSP $n{{\!=\!}}{n}$', zorder=4)
-
-        # Noise PSD overlay (scaled for visibility)
-        w_vis = np.linspace(3e-2, 30, 2000)
+        # Noise PSD fill
+        w_vis = np.linspace(1e-1, 30, 2000)
         s_vis = S_func(w_vis)
-        s_vis = s_vis / (np.max(s_vis) + 1e-30) * 0.25
-        ax.fill_between(w_vis, 1e-20, s_vis + 1e-20,
-                        color='0.85', zorder=0, label=r'$S(\omega)$ (scaled)')
+        s_vis = s_vis / (np.max(s_vis) + 1e-30) * 0.12
+        ax.fill_between(w_vis, 1e-20, s_vis + 1e-20, color='0.88', zorder=0)
 
-        ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=11)
-        ax.set_xlim([3e-2, 30])
-        ax.set_ylim([1e-9, 1.5])
-        ax.set_title(panel_title, fontsize=11)
-        ax.grid(True, alpha=0.3, which='both')
+        ax.set_xlim([1e-1, 30])
+        ax.set_ylim([1e-8, 1.5])
+        ax.set_title(pd['title'])
+        ax.grid(True, alpha=0.25, which='both')
+        ax.tick_params(which='both', top=True, right=True)
 
-    axes[0].set_ylabel(r'$F(\omega)\,/\,T^2$', fontsize=11)
+    # Shared axis labels
+    axes[0, 0].set_ylabel(r'$\mathcal{F}_e(\omega)\,/\,T^2$')
+    axes[1, 0].set_ylabel(r'$\mathcal{F}_e(\omega)\,/\,T^2$')
+    axes[1, 0].set_xlabel(r'$\omega$ (rad s$^{-1}$)')
+    axes[1, 1].set_xlabel(r'$\omega$ (rad s$^{-1}$)')
 
-    # Single legend on first panel
-    axes[0].legend(fontsize=7.5, loc='lower left', ncol=1)
+    # ── Legend panel ──────────────────────────────────────────────────────────
+    legend_ax.axis('off')
+    # Collect legend handles from the last active panel
+    ax_last = panel_axes[-1]
+    pd_last = panel_data[-1]
 
-    fig.suptitle(
-        r'Three-level clock filter functions — $T = 2\pi$, all protocols at $\delta = 0$'
-        '\n'
-        r'Equiangular and QSP sequences optimised independently for each noise model',
-        fontsize=11)
+    legend_entries = [
+        (matplotlib.lines.Line2D([0], [0], color=COLOR_RAMSEY,   lw=1.8, ls='--'), 'Ramsey'),
+        (matplotlib.lines.Line2D([0], [0], color=COLOR_GPS1,     lw=1.8, ls='-.'), r'GPS $m{=}1$'),
+        (matplotlib.lines.Line2D([0], [0], color=COLOR_DPI,      lw=1.5, ls=':' ), r'QSP $n{=}2$ (double-$\pi$)'),
+        (matplotlib.lines.Line2D([0], [0], color=COLOR_EQ_BEST,  lw=2.0, ls='-' ), r'Best equiangular (noise-opt.)'),
+        (matplotlib.lines.Line2D([0], [0], color=COLOR_QSP_BEST, lw=2.0, ls='-' ), r'Best QSP (noise-opt.)'),
+        (matplotlib.patches.Patch(facecolor='0.88', edgecolor='0.7'), r'$S(\omega)$ (scaled)'),
+    ]
+    handles, labels = zip(*legend_entries)
+    legend_ax.legend(handles, labels,
+                     loc='center',
+                     frameon=True, framealpha=0.9,
+                     edgecolor='0.7', handlelength=2.5,
+                     title=r'$T=2\pi,\;\delta=0$',
+                     title_fontsize=8)
 
     for ext in ['pdf', 'png']:
         path = OUTPUT_DIR / f'protocol_comparison.{ext}'

@@ -30,7 +30,7 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
 )
 
 T          = 2 * np.pi
-OMEGA_CUTOFF = 2 * np.pi / T
+OMEGA_CUTOFF = None  # FL-cutoff: 2*pi/T (Fourier limit — matches paper Table I)
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 CACHE_PREFIX = 'equiangular_opt_cache'
 OBJECTIVE_MODE = 'ramsey_normalized'
@@ -40,6 +40,7 @@ OBJECTIVE_WEIGHT = 1.0  # unused for inv_sens_plus_noise
 NOISE_SPECS = [
     ('white',       'White',              white_noise_psd()),
     ('1f',          '$1/f$',              one_over_f_psd()),
+    ('highpass1',   'High-pass ($\\omega_c{=}1$)', high_pass_psd(omega_c=1.0)),
     ('highpass2',   'High-pass ($\\omega_c{=}2$)', high_pass_psd(omega_c=2.0)),
 ]
 
@@ -47,9 +48,9 @@ NOISE_SPECS = [
 # use_analytic=True (default) uses the fast analytic filter path.
 # n_fft / pad_factor are ignored when use_analytic=True.
 OPT_BUDGETS = {
-    4:  dict(popsize=15, maxiter=400, n_restarts=8, seed=7),
-    8:  dict(popsize=15, maxiter=400, n_restarts=5, seed=13),
-    16: dict(popsize=15, maxiter=400, n_restarts=3, seed=17),
+    4:  dict(popsize=15, maxiter=400, n_restarts=15, seed=7),
+    8:  dict(popsize=15, maxiter=400, n_restarts=10, seed=13),
+    16: dict(popsize=15, maxiter=400, n_restarts=6,  seed=17),
 }
 
 
@@ -133,13 +134,14 @@ def main():
     # ── Print LaTeX table fragment ────────────────────────────────────────────
     print('\n\n--- LaTeX rows ---')
     for N in N_values:
-        r_w  = results[N]['white']
-        r_f  = results[N]['1f']
-        r_hp = results[N]['highpass2']
-        omT  = r_w.omega * T   # use white-noise Omega for display
-        phs  = r_w.phases
-        pstr = '[' + ', '.join(f'{p:.3f}' for p in phs) + ']'
-        print(f'Equiangular $N{{=}}{N}$ & {r_w.sigma_nu:.4f} & {r_f.sigma_nu:.4f} & {r_hp.sigma_nu:.4f} \\\\')
+        r_w   = results[N]['white']
+        r_f   = results[N]['1f']
+        r_hp1 = results[N]['highpass1']
+        r_hp2 = results[N]['highpass2']
+        omT   = r_w.omega * T
+        phs   = r_w.phases
+        pstr  = '[' + ', '.join(f'{p:.3f}' for p in phs) + ']'
+        print(f'Equiangular $N{{=}}{N}$ & {r_w.sigma_nu:.4f} & {r_f.sigma_nu:.4f} & {r_hp1.sigma_nu:.4f} & {r_hp2.sigma_nu:.4f} \\\\')
         print(f'  % OmegaT={omT:.4f}  phases={pstr}')
 
     # ── Print detailed parameters per noise case ──────────────────────────────

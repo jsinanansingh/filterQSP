@@ -80,15 +80,12 @@ from .noise import (
 
 from .three_level_filter import (
     fft_three_level_filter,
-    analytic_three_level_filter,
-    three_level_noise_variance,
     Ff_analytic,
     detuning_sensitivity,
-    detuning_sensitivity_2level,
     analytic_filter,
-    raised_cosine_filter,
-    raised_cosine_filter_analytic,
-    _jacobi_anger_integrals,
+    gps_shaped_filter,
+    default_omega_cutoff,
+    resolve_omega_cutoff,
 )
 
 from .spin_displacement import (
@@ -223,7 +220,10 @@ __all__ = [
     'bloch_components_from_matrix',
     # Three-level clock filter functions
     'fft_three_level_filter',
-    'analytic_three_level_filter',
-    'three_level_noise_variance',
     'Ff_analytic',
+    'detuning_sensitivity',
+    'analytic_filter',
+    'gps_shaped_filter',
+    'default_omega_cutoff',
+    'resolve_omega_cutoff',
 ]

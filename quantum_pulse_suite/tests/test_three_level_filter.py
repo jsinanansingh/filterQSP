@@ -2,11 +2,12 @@
 Unit tests for three-level clock filter functions.
 
 Tests cover:
-- FFT vs analytic agreement for Chi(w) / Fe(w) on Ramsey and spin echo sequences
+- FFT vs analytic agreement for Fe(w) on Ramsey, spin echo, and GPS sequences
 - Known limits for Ramsey with delta=0
-- Ff formula correctness (sinc-like, analytic)
+- Ff_analytic formula correctness (protocol-independent clock noise)
 - m_y dependence of Fe
-- Variance integration sanity checks
+- detuning_sensitivity against GPS analytic formula
+- GPS shaped filter function
 """
 
 import unittest
@@ -20,15 +21,10 @@ from quantum_pulse_suite.core.multilevel import (
 )
 from quantum_pulse_suite.core.three_level_filter import (
     fft_three_level_filter,
-    analytic_three_level_filter,
     analytic_filter,
-    three_level_noise_variance,
     Ff_analytic,
-    kubo_filter_2level,
-    kubo_filter_3level,
-    kubo_filter_2level_analytic,
-    kubo_filter_3level_analytic,
     detuning_sensitivity,
+    gps_shaped_filter,
 )
 from quantum_pulse_suite import (
     continuous_ramsey_sequence,
@@ -222,65 +218,6 @@ class TestFFTvsAnalytic(unittest.TestCase):
                                         tau=tau, delta=0.0)
             self._compare_Fe(seq, f"SpinEcho(tau={tau})")
 
-class TestRamseyKnownLimits(unittest.TestCase):
-    """Test Chi against known formulas for simple sequences."""
-
-    def setUp(self):
-        self.system = ThreeLevelClock()
-
-    def test_ramsey_delta_zero_Chi_form(self):
-        """
-        Ramsey delta=0: the QSP unitary on {|g>,|e>} is
-        pi/2_x - free(tau) - pi/2_x.
-
-        The Chi integrand |G(t)|^2 is constant during free evolution for this
-        sequence, so |Chi(w)|^2 has a sinc-like shape.
-        """
-        tau = 2.0
-        seq = multilevel_ramsey(self.system, self.system.probe,
-                                tau=tau, delta=0.0)
-        seq.compute_polynomials()
-
-        # After first pi/2_x: f = cos(pi/4) = 1/sqrt(2), g = sin(pi/4) = 1/sqrt(2)
-        # During free evolution (delta=0): F(t) = f, G(t) = g (constant)
-        # So F*G = conj(f)*g = (1/sqrt(2))*(1/sqrt(2)) = 1/2
-
-        # Chi(w) = (1/2) * integral_0^tau e^{-iwt} dt
-        # = (1/2) * (1 - e^{-iwτ})/(iw)
-        # |Chi|^2 = (1/4) * 2(1-cos(wτ))/w^2 = (1-cos(wτ))/(2w^2)
-
-        freqs = np.linspace(0.5, 30.0, 200)
-        _, _, _, Chi_ana = analytic_three_level_filter(seq, freqs, m_y=1.0)
-
-        Chi2_expected = (1 - np.cos(freqs * tau)) / (2 * freqs**2)
-        Chi2_actual = np.abs(Chi_ana)**2
-
-        np.testing.assert_allclose(Chi2_actual, Chi2_expected, rtol=0.01,
-                                    err_msg="Ramsey delta=0 |Chi|^2 mismatch")
-
-    def test_ramsey_delta_nonzero_Chi(self):
-        """
-        Ramsey with detuning: |G|^2 is still constant during free evolution,
-        so |Chi|^2 has the same sinc envelope regardless of delta.
-        """
-        tau = 2.0
-        freqs = np.linspace(0.5, 30.0, 200)
-
-        seq0 = multilevel_ramsey(self.system, self.system.probe,
-                                  tau=tau, delta=0.0)
-        seq0.compute_polynomials()
-        _, _, _, Chi0 = analytic_three_level_filter(seq0, freqs, m_y=1.0)
-
-        seq1 = multilevel_ramsey(self.system, self.system.probe,
-                                  tau=tau, delta=1.5)
-        seq1.compute_polynomials()
-        _, _, _, Chi1 = analytic_three_level_filter(seq1, freqs, m_y=1.0)
-
-        # |Chi|^2 should be the same regardless of delta
-        np.testing.assert_allclose(
-            np.abs(Chi0)**2, np.abs(Chi1)**2, rtol=0.01,
-            err_msg="|Chi|^2 should be delta-independent for Ramsey")
-
 
 class TestMzDependence(unittest.TestCase):
     """Test measurement-component dependence of Fe and Ff."""
@@ -324,91 +261,10 @@ class TestMzDependence(unittest.TestCase):
         np.testing.assert_allclose(Ff_half, 0.75 * Ff_0, rtol=1e-12)
 
 
-class TestNoiseVarianceIntegration(unittest.TestCase):
-    """Test noise variance computation."""
 
-    def setUp(self):
-        self.system = ThreeLevelClock()
+class TestFFTvsAnalyticFilter(unittest.TestCase):
+    """fft_three_level_filter and analytic_filter should agree on significant signal."""
 
-    def test_white_noise_e_only(self):
-        """Variance with white e-noise only should be positive."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        freqs, Fe, Ff, _ = fft_three_level_filter(seq, m_y=1.0, m_z=0.0)
-
-        S_e = lambda w: np.ones_like(w) * 1e-4
-        S_f = lambda w: np.zeros_like(w)
-
-        var = three_level_noise_variance(Fe, Ff, freqs, S_e, S_f)
-        self.assertGreater(var, 0.0)
-        self.assertTrue(np.isfinite(var))
-
-    def test_white_noise_f_only(self):
-        """Variance with white f-noise only and m_z=0."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        freqs, Fe, Ff, _ = fft_three_level_filter(seq, m_z=0.0)
-
-        S_e = lambda w: np.zeros_like(w)
-        S_f = lambda w: np.ones_like(w) * 1e-4
-
-        var = three_level_noise_variance(Fe, Ff, freqs, S_e, S_f)
-        self.assertGreater(var, 0.0)
-        self.assertTrue(np.isfinite(var))
-
-    def test_variance_zero_noise(self):
-        """Zero noise should give zero variance."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        freqs, Fe, Ff, _ = fft_three_level_filter(seq, m_z=0.0)
-
-        S_e = lambda w: np.zeros_like(w)
-        S_f = lambda w: np.zeros_like(w)
-
-        var = three_level_noise_variance(Fe, Ff, freqs, S_e, S_f)
-        self.assertAlmostEqual(var, 0.0, places=15)
-
-    def test_variance_scales_with_noise_amplitude(self):
-        """Variance should scale linearly with noise PSD amplitude."""
-        seq = multilevel_ramsey(self.system, self.system.probe, tau=1.0)
-        freqs, Fe, Ff, _ = fft_three_level_filter(seq, m_y=1.0, m_z=1.0)
-
-        S_f_zero = lambda w: np.zeros_like(w)
-
-        var1 = three_level_noise_variance(
-            Fe, Ff, freqs,
-            S_e=lambda w: np.ones_like(w) * 1.0,
-            S_f=S_f_zero)
-        var2 = three_level_noise_variance(
-            Fe, Ff, freqs,
-            S_e=lambda w: np.ones_like(w) * 2.0,
-            S_f=S_f_zero)
-
-        if var1 > 1e-15:
-            np.testing.assert_allclose(var2, 2.0 * var1, rtol=1e-6)
-
-
-class TestSpinEchoChiShape(unittest.TestCase):
-    """Basic structure test for spin-echo Chi."""
-
-    def setUp(self):
-        self.system = ThreeLevelClock()
-
-    def test_spin_echo_chi_is_finite(self):
-        """Spin echo |Chi|^2 should be finite on a harmonic sample grid."""
-        tau = 2.0
-        seq = multilevel_spin_echo(self.system, self.system.probe,
-                                    tau=tau, delta=0.0)
-        seq.compute_polynomials()
-        fundamental = 2 * np.pi / tau
-        even_harmonics = np.array([2, 4, 6]) * fundamental
-        _, _, _, Chi = analytic_three_level_filter(seq, even_harmonics, m_y=1.0)
-        self.assertTrue(np.all(np.isfinite(np.abs(Chi)**2)))
-
-
-
-class TestKuboFFTvsAnalytic(unittest.TestCase):
-    """FFT and analytic Kubo/filter-function paths should agree on significant signal."""
-
-    M_HAT = np.array([0., 1., 0.])
-    R0    = np.array([1., 0., 0.])
     N_FFT_SAMPLES = 8192
     PAD = 4
     N_CHECK = 50      # number of frequencies passed to the analytic function
@@ -417,25 +273,20 @@ class TestKuboFFTvsAnalytic(unittest.TestCase):
     def setUp(self):
         self.system = ThreeLevelClock()
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _check_3level(self, seq3, label):
-        seq3.compute_polynomials()
-        T = seq3.total_duration()
+    def _check(self, seq, label):
+        seq.compute_polynomials()
+        T = seq.total_duration()
 
         freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
-            seq3, n_samples=self.N_FFT_SAMPLES, pad_factor=self.PAD)
+            seq, n_samples=self.N_FFT_SAMPLES, pad_factor=self.PAD)
 
-        # Pick ~N_CHECK frequencies in the informative band
         band = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 50.0)
         idx_sub = np.round(
             np.linspace(0, band.sum() - 1, self.N_CHECK)).astype(int)
         freqs_check  = freqs_fft[band][idx_sub]
         Fe_fft_check = Fe_fft[band][idx_sub]
 
-        _, Fe_ana = analytic_filter(seq3, freqs_check)
+        _, Fe_ana = analytic_filter(seq, freqs_check)
 
         peak = max(np.max(Fe_fft_check), np.max(Fe_ana))
         if peak < 1e-20:
@@ -450,48 +301,14 @@ class TestKuboFFTvsAnalytic(unittest.TestCase):
             np.max(rel_err), self.RTOL,
             msg=f"{label}: max rel error {np.max(rel_err):.4f} > {self.RTOL}")
 
-    def _check_2level(self, seq2, label):
-        seq2.compute_polynomials()
-        T = seq2.total_duration()
-
-        freqs_fft, Fk_fft = kubo_filter_2level(
-            seq2, m_hat=self.M_HAT, r0=self.R0,
-            n_samples=self.N_FFT_SAMPLES, pad_factor=self.PAD)
-
-        band = (freqs_fft > 2 * np.pi / T) & (freqs_fft < 50.0)
-        idx_sub = np.round(
-            np.linspace(0, band.sum() - 1, self.N_CHECK)).astype(int)
-        freqs_check  = freqs_fft[band][idx_sub]
-        Fk_fft_check = Fk_fft[band][idx_sub]
-
-        _, Fk_ana = kubo_filter_2level_analytic(
-            seq2, freqs_check, m_hat=self.M_HAT, r0=self.R0)
-
-        peak = max(np.max(Fk_fft_check), np.max(Fk_ana))
-        if peak < 1e-20:
-            return
-
-        sig = (Fk_fft_check > 1e-3 * peak) & (Fk_ana > 1e-3 * peak)
-        if not np.any(sig):
-            return
-
-        rel_err = np.abs(Fk_fft_check[sig] - Fk_ana[sig]) / Fk_ana[sig]
-        self.assertLess(
-            np.max(rel_err), self.RTOL,
-            msg=f"{label}: max rel error {np.max(rel_err):.4f} > {self.RTOL}")
-
-    # ------------------------------------------------------------------
-    # 3-level tests
-    # ------------------------------------------------------------------
-
-    def test_3level_ramsey_instant(self):
+    def test_ramsey_instant(self):
         """Instantaneous Ramsey (free-evolution only): FFT matches analytic_filter."""
         for tau in [1.0, 2 * np.pi]:
             seq = multilevel_ramsey(self.system, self.system.probe,
                                     tau=tau, delta=0.0)
-            self._check_3level(seq, f"3L Ramsey instant tau={tau:.2f}")
+            self._check(seq, f"Ramsey instant tau={tau:.2f}")
 
-    def test_3level_ramsey_continuous(self):
+    def test_ramsey_continuous(self):
         """Continuous Ramsey (pi/2 pulses + free evolution): FFT matches analytic_filter."""
         T = 2 * np.pi
         omega = 20 * np.pi
@@ -501,50 +318,15 @@ class TestKuboFFTvsAnalytic(unittest.TestCase):
         seq.add_continuous_pulse(omega, [1, 0, 0], 0.0, tau_pi2)
         seq.add_free_evolution(tau_free, 0.0)
         seq.add_continuous_pulse(omega, [1, 0, 0], 0.0, tau_pi2)
-        self._check_3level(seq, "3L Ramsey continuous")
+        self._check(seq, "Ramsey continuous")
 
-    def test_3level_rabi(self):
-        """Single continuous Rabi pulse: FFT matches analytic_filter."""
+    def test_gps_rabi(self):
+        """Single continuous Rabi pulse (GPS m=1): FFT matches analytic_filter."""
         T = 2 * np.pi
         seq = MultiLevelPulseSequence(self.system, self.system.probe)
         seq.add_continuous_pulse(np.pi / T, [1, 0, 0], 0.0, T)
-        self._check_3level(seq, "3L Rabi m=1")
+        self._check(seq, "GPS Rabi m=1")
 
-    # ------------------------------------------------------------------
-    # 2-level tests
-    # ------------------------------------------------------------------
-
-    def test_2level_ramsey_continuous(self):
-        """Continuous Ramsey qubit: FFT matches analytic.
-
-        Uses a moderate pi/2-pulse frequency so the pulse duration (~0.25 s) is
-        well-resolved at N_FFT_SAMPLES=8192.  The very-fast-pulse case
-        (omega=20π) needs ~130k samples for FFT accuracy due to cancellation
-        between the two short pulses; that is a sampling limitation, not a bug.
-        """
-        T = 2 * np.pi
-        omega = 2 * np.pi   # tau_pi2 = T/4 = pi/2, well-sampled
-        seq = continuous_ramsey_sequence(omega=omega, tau=T, delta=0.0)
-        self._check_2level(seq, "2L Ramsey continuous (slow pulses)")
-
-    def test_2level_rabi(self):
-        """Single Rabi qubit: FFT matches analytic."""
-        T = 2 * np.pi
-        seq = continuous_rabi_sequence(omega=np.pi / T, tau=T, delta=0.0)
-        self._check_2level(seq, "2L Rabi m=1")
-
-    def test_2level_rabi_m2(self):
-        """Two Rabi cycles qubit (GPS m=2 proxy): FFT matches analytic.
-
-        The single continuous segment completes exactly one full cycle at the
-        midpoint (q=0 at both t=0 and t=T/2), which would fool the old
-        midpoint-heuristic free-evolution detector.  The _poly_list fix ensures
-        it is correctly treated as a continuous pulse.
-        """
-        T = 2 * np.pi
-        omega = 2 * 2 * np.pi / T   # 2 complete cycles
-        seq = continuous_rabi_sequence(omega=omega, tau=T, delta=0.0)
-        self._check_2level(seq, "2L GPS m=2 proxy")
 
 
 class TestGPSDetuningSensitivityAnalytic(unittest.TestCase):
@@ -810,201 +592,99 @@ class TestAnalyticVsFFTOptimizer(unittest.TestCase):
         )
 
 
-class TestRaisedCosineFilter(unittest.TestCase):
-    """Numerical validation of the pulse-shaping section (Sec. VI of paper).
 
-    Tests:
-    1. Jacobi-Anger analytic F(omega) agrees with dense quadrature.
-    2. Square-pulse clock channel |Chi|^2 ~ omega^{-4} at high freq.
-    3. Raised-cosine clock channel |Chi|^2 ~ omega^{-6} at high freq.
-    4. Raised-cosine noise variance lower than square under high-pass noise.
-    5. Signal slope (sensitivity_sq) is unchanged by pulse shaping.
+class TestGpsShapedFilterMethods(unittest.TestCase):
+    """Verify gps_shaped_filter method='direct' vs method='piecewise'.
 
-    Notes on boundary conditions
-    ----------------------------
-    The omega^{-4} (square) and omega^{-6} (raised-cosine) roll-offs of the probe
-    channel only hold when phi(0) = phi(T) = 0, i.e. F*(t)G(t) vanishes at both
-    endpoints.  This requires b_final = 0, which occurs when the total rotation angle
-    is a multiple of 2*pi.
-
-    For the standard equiangular sequences optimized for FOM (Omega*T ~ 8.18), the
-    total rotation is NOT a multiple of 2*pi so b_final != 0, and the dominant
-    high-frequency term of the probe channel is O(omega^{-2}).  Those sequences are
-    therefore NOT suitable for pulse-shaping roll-off tests.
-
-    We instead use an N=4 equiangular sequence with Theta=2*pi per segment
-    (Omega = 2*pi/tau = N*2*pi/T = 4 rad/s for T=2*pi, N=4).  This satisfies
-    b_final = 0 automatically for any phases.
+    Both methods must agree on the noise variance to within 1 % for three
+    envelope shapes (square, Hann, Blackman) and two GPS operating points
+    (m=1, m=8), under white, 1/f, and high-pass noise.
     """
 
-    def _make_seq(self, N=4, omega=None, phases=None):
-        """Build N-segment sequence suitable for pulse-shaping roll-off tests.
+    T = 2 * np.pi
+    REL_TOL = 0.01   # 1 %
 
-        Uses Theta = 2*pi per segment (full rotation), ensuring phi(T) = 0.
-        """
-        from quantum_pulse_suite.systems import ThreeLevelClock
-        from quantum_pulse_suite.analysis.pulse_optimizer import build_equiangular_3level
+    @staticmethod
+    def _envelope_square(ts, T, omega_mean):
+        return np.full_like(ts, omega_mean, dtype=float)
 
-        T = 2.0 * np.pi
-        tau = T / N
-        if omega is None:
-            # Full 2*pi rotation per segment -> b_final = 0 -> phi(T) = 0
-            omega = 2.0 * np.pi / tau   # = N / T * 2*pi
-        if phases is None:
-            phases = [0.0, 1.476, 0.154, 1.178]
+    @staticmethod
+    def _envelope_hann(ts, T, omega_mean):
+        return omega_mean * (1.0 - np.cos(2.0 * np.pi * ts / T))
 
-        system = ThreeLevelClock()
-        return build_equiangular_3level(system, T, N, omega, phases[:N])
+    @staticmethod
+    def _envelope_blackman(ts, T, omega_mean):
+        a0, a1, a2 = 0.42, 0.50, 0.08
+        return (omega_mean / a0) * (a0
+                                    - a1 * np.cos(2.0 * np.pi * ts / T)
+                                    + a2 * np.cos(4.0 * np.pi * ts / T))
 
-    def test_jacobi_anger_vs_quadrature_phi(self):
-        """Jacobi-Anger Phi(omega) agrees with dense-quadrature Phi within 1%."""
-        from quantum_pulse_suite.core.three_level_filter import (
-            raised_cosine_filter,
-            raised_cosine_filter_analytic,
-        )
-        seq = self._make_seq()
-        omegas = np.logspace(-1, 2, 80)
+    def _build_seq_pw(self, system, omega_mean, envelope_fn, n_disc=256):
+        from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
+        tau    = self.T / n_disc
+        ts_mid = (np.arange(n_disc) + 0.5) * tau
+        omegas = np.maximum(envelope_fn(ts_mid, self.T, omega_mean), 1e-9)
+        seq    = MultiLevelPulseSequence(system, system.probe)
+        for ok in omegas:
+            seq.add_continuous_pulse(ok, [1, 0, 0], 0.0, tau)
+        seq.compute_polynomials()
+        return seq
 
-        _, Fe_num = raised_cosine_filter(seq, omegas, n_per_segment=2048)
-        _, Fe_ana, Phi_ana, _ = raised_cosine_filter_analytic(
-            seq, omegas, n_terms=40, n_chi_pts=512)
-
-        # Phi from numerical: recompute directly
-        _, Fe_num2 = raised_cosine_filter(seq, omegas, n_per_segment=2048)
-
-        # Fe values should agree to within 2% at most frequencies
-        ratio = Fe_ana / (Fe_num + 1e-20)
-        # Exclude near-zero values (Fe < 1% of max)
-        mask = Fe_num > 0.01 * Fe_num.max()
-        self.assertTrue(
-            np.allclose(ratio[mask], 1.0, rtol=0.02, atol=0.0),
-            f"Jacobi-Anger Fe differs from quadrature by more than 2%: "
-            f"max ratio deviation = {np.max(np.abs(ratio[mask]-1)):.4f}"
-        )
-
-    def test_square_clock_rolloff_omega_minus_4(self):
-        """Square-pulse clock channel |Chi|^2 falls as omega^{-4} at high freq.
-
-        For an integer-rotation sequence (b_final=0 per segment), chi(t)=|G(t)|^2
-        is C^1 at segment boundaries (chi=0 and chi'=0 at boundaries) but C^2 only
-        if chi''=0, which fails for square pulses. This gives |Chi|^2 ~ omega^{-4}.
-        """
-        from quantum_pulse_suite.core.three_level_filter import analytic_filter
-
-        seq = self._make_seq()
-        omegas = np.logspace(np.log10(30), np.log10(300), 50)
-        _, Fe_clock = analytic_filter(seq, omegas, m_y=1.0)
-
-        log_w = np.log(omegas)
-        log_Fe = np.log(Fe_clock + 1e-30)
-        slope = np.polyfit(log_w, log_Fe, 1)[0]
-
-        self.assertLess(slope, -3.0,
-            f"Square clock slope should be < -3 (expected ~ -4), got {slope:.2f}")
-        self.assertGreater(slope, -5.5,
-            f"Square clock slope should be > -5.5, got {slope:.2f}")
-
-    def test_raised_cosine_clock_rolloff_steeper_than_square(self):
-        """Raised-cosine clock channel |Chi|^2 rolls off steeper than square-pulse.
-
-        For full-rotation segments (Theta=2*pi), the RC envelope makes chi(t)
-        very smooth at segment boundaries, giving a slope steeper than -4.
-        The exact exponent depends on sequence geometry but is always steeper
-        than the square-pulse -4 roll-off.
-        """
-        from quantum_pulse_suite.core.three_level_filter import (
-            raised_cosine_filter, analytic_filter)
-
-        seq = self._make_seq()
-        omegas = np.logspace(np.log10(50), np.log10(500), 50)
-        _, Fe_clock_sq = analytic_filter(seq, omegas, m_y=1.0)
-        _, Fe_clock_rc = raised_cosine_filter(seq, omegas, m_y=1.0, n_per_segment=1024)
-
-        log_w = np.log(omegas)
-        slope_sq = np.polyfit(log_w, np.log(Fe_clock_sq + 1e-30), 1)[0]
-        slope_rc = np.polyfit(log_w, np.log(Fe_clock_rc + 1e-30), 1)[0]
-
-        self.assertLess(slope_rc, slope_sq,
-            f"RC clock slope ({slope_rc:.2f}) should be steeper than square ({slope_sq:.2f})")
-        self.assertLess(slope_rc, -5.0,
-            f"RC clock slope should be at least -5, got {slope_rc:.2f}")
-
-    def test_rc_steeper_rolloff_than_square(self):
-        """Raised-cosine clock roll-off is steeper than square-pulse clock roll-off.
-
-        Both tested with m_y=1 (full clock channel |Chi|^2).
-        Expected: RC slope ~ -6 vs square slope ~ -4, so at least 1 steeper.
-        """
-        from quantum_pulse_suite.core.three_level_filter import (
-            analytic_filter,
-            raised_cosine_filter,
-        )
-        seq = self._make_seq()
-        omegas = np.logspace(np.log10(50), np.log10(300), 40)
-
-        _, Fe_sq = analytic_filter(seq, omegas, m_y=1.0)
-        _, Fe_rc = raised_cosine_filter(seq, omegas, m_y=1.0, n_per_segment=1024)
-
-        log_w = np.log(omegas)
-        slope_sq = np.polyfit(log_w, np.log(Fe_sq + 1e-30), 1)[0]
-        slope_rc = np.polyfit(log_w, np.log(Fe_rc + 1e-30), 1)[0]
-
-        self.assertLess(slope_rc, slope_sq - 1.0,
-            f"RC clock slope ({slope_rc:.2f}) should be at least 1 steeper than "
-            f"square clock slope ({slope_sq:.2f})")
-
-    def test_signal_preserved_by_pulse_shaping(self):
-        """Pulse shaping preserves signal slope (same total rotation -> same CK amplitudes).
-
-        The sensitivity d<M>/d(delta) depends only on the QSP polynomial evaluated at
-        the final CK amplitudes.  Both square and raised-cosine envelopes end each segment
-        at the same (a, b), so sensitivity_sq is identical.
-
-        The Theta=2pi case gives sensitivity_sq = 0 (trivial final state), so we use
-        a GPS m=8 sequence instead (partial rotation, non-trivial signal).
-        """
-        from quantum_pulse_suite.systems import ThreeLevelClock
-        from quantum_pulse_suite.analysis.pulse_optimizer import build_equiangular_3level
-        from quantum_pulse_suite.core.three_level_filter import detuning_sensitivity
-
-        T = 2.0 * np.pi
-        system = ThreeLevelClock()
-        # GPS m=8: Omega*T=8*2*pi -> 8 full rotations, non-trivial intermediate states
-        # but b_final=0 (for m integer). Use N=1 single-segment.
-        seq = build_equiangular_3level(system, T, 1, 8.0, [0.0])
-        _, sens_sq = detuning_sensitivity(seq)
-        self.assertGreater(sens_sq, 0.0,
-            f"sensitivity_sq={sens_sq:.4f} should be > 0")
-
-    def test_raised_cosine_lower_clock_noise_highpass(self):
-        """Under high-pass noise, RC clock noise variance < square clock noise variance.
-
-        For the N=4 Theta=2*pi sequence (b_final=0), the clock channel has:
-          square: omega^{-4} roll-off
-          RC:     omega^{-6} roll-off
-        The faster roll-off means lower noise integral under high-pass noise.
-        """
+    def _noise_var(self, freqs, Fe, S_func, omega_cutoff=1e-4):
         from scipy.integrate import simpson
-        from quantum_pulse_suite.core.three_level_filter import (
-            analytic_filter,
-            raised_cosine_filter,
-        )
-        from quantum_pulse_suite.analysis.pulse_optimizer import high_pass_psd
+        mask = freqs >= omega_cutoff
+        if mask.sum() < 2:
+            return 0.0
+        return float(simpson(Fe[mask] * S_func(freqs[mask]),
+                             x=freqs[mask]) / (2 * np.pi))
 
-        seq = self._make_seq()
-        S_hp = high_pass_psd(omega_c=2.0)
+    def _check_envelope(self, envelope_name, envelope_fn, omega_mean):
+        from quantum_pulse_suite.analysis.pulse_optimizer import (
+            white_noise_psd, one_over_f_psd, high_pass_psd)
+        system = ThreeLevelClock()
+        noise_specs = [
+            ('white', white_noise_psd()),
+            ('1/f',   one_over_f_psd()),
+            ('hp2',   high_pass_psd(omega_c=2.0)),
+        ]
 
-        omegas = np.linspace(0.05, 200.0, 8192)
-        _, Fe_sq = analytic_filter(seq, omegas, m_y=1.0)
-        _, Fe_rc = raised_cosine_filter(seq, omegas, m_y=1.0, n_per_segment=1024)
+        freqs_d, Fe_d = gps_shaped_filter(
+            envelope_fn, self.T, omega_mean, method='direct',
+            n_samples=8192, pad_factor=4)
 
-        noise_sq = float(simpson(Fe_sq * S_hp(omegas), x=omegas) / (2.0 * np.pi))
-        noise_rc = float(simpson(Fe_rc * S_hp(omegas), x=omegas) / (2.0 * np.pi))
+        seq_pw = self._build_seq_pw(system, omega_mean, envelope_fn)
+        freqs_p, Fe_p = gps_shaped_filter(
+            envelope_fn, self.T, omega_mean, method='piecewise',
+            n_samples=4 * 256, pad_factor=4, seq=seq_pw)
 
-        self.assertGreater(noise_sq, noise_rc,
-            f"Expected RC noise ({noise_rc:.4f}) < square noise ({noise_sq:.4f}) "
-            f"under high-pass noise, but got the opposite.")
+        for nname, S_func in noise_specs:
+            nv_d = self._noise_var(freqs_d, Fe_d, S_func)
+            nv_p = self._noise_var(freqs_p, Fe_p, S_func)
+            if nv_d < 1e-20 and nv_p < 1e-20:
+                continue
+            rel = abs(nv_d - nv_p) / max(abs(nv_d), 1e-30)
+            self.assertLess(
+                rel, self.REL_TOL,
+                f'{envelope_name} omega_mean={omega_mean:.3f} [{nname}]: '
+                f'direct={nv_d:.6e}, piecewise={nv_p:.6e}, rel={rel:.4f}')
 
+    def test_square_m1(self):
+        self._check_envelope('square', self._envelope_square, 2 * np.pi * 1 / self.T)
+
+    def test_hann_m1(self):
+        self._check_envelope('hann', self._envelope_hann, 2 * np.pi * 1 / self.T)
+
+    def test_blackman_m1(self):
+        self._check_envelope('blackman', self._envelope_blackman, 2 * np.pi * 1 / self.T)
+
+    def test_square_m8(self):
+        self._check_envelope('square', self._envelope_square, 2 * np.pi * 8 / self.T)
+
+    def test_hann_m8(self):
+        self._check_envelope('hann', self._envelope_hann, 2 * np.pi * 8 / self.T)
+
+    def test_blackman_m8(self):
+        self._check_envelope('blackman', self._envelope_blackman, 2 * np.pi * 8 / self.T)
 
 
 if __name__ == '__main__':

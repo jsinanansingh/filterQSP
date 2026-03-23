@@ -47,7 +47,7 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
 
 T          = 2 * np.pi
 OMEGA_FAST = 20.0 * np.pi
-OMEGA_CUTOFF = default_omega_cutoff(T)
+OMEGA_CUTOFF = 1e-4   # effectively DC; captures full per-shot noise variance
 N_FFT      = 4096   # time samples for FFT Kubo integrals
 OMEGA_PLOT = np.logspace(-2, np.log10(30), 800)   # log-spaced for analytic plots
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
@@ -161,6 +161,13 @@ def build_ramsey(system):
     return build_qsp_3level(system, T, 2, thetas, phis, OMEGA_FAST)
 
 
+def build_double_pi(system):
+    """QSP n=2 with two pi pulses — maximises DC sensitivity."""
+    thetas = np.array([np.pi, np.pi])
+    phis   = np.array([0.0, 0.0])
+    return build_qsp_3level(system, T, 2, thetas, phis, OMEGA_FAST)
+
+
 def get_filter(seq):
     """Return (sens_sq, freqs, Fe) via analytic Fourier integrals on log-spaced grid."""
     _, ss = detuning_sensitivity(seq)
@@ -216,6 +223,7 @@ def main():
     # ── Reference protocols ───────────────────────────────────────────────────
     print('Building reference sequences ...', flush=True)
     seq_R    = build_ramsey(system)
+    seq_dpi  = build_double_pi(system)
     seq_gps1 = build_gps(system, 1)
     seq_gps8 = build_gps(system, 8)
 
@@ -242,10 +250,11 @@ def main():
     seq_eq4 = res_eq4.seq
 
     refs = [
-        ('Ramsey',          seq_R,    'C3', '--'),
-        ('GPS m=1',         seq_gps1, 'C0', '-.'),
-        ('GPS m=8',         seq_gps8, 'C2', '-.'),
-        ('Equiangular N=4', seq_eq4,  'C1', '-'),
+        ('Ramsey',                  seq_R,    'C3',      '--'),
+        (r'QSP $n=2$ ($2\pi$-Ramsey)', seq_dpi, '#9B30FF', ':'),
+        ('GPS m=1',                 seq_gps1, 'C0',      '-.'),
+        ('GPS m=8',                 seq_gps8, 'C2',      '-.'),
+        ('Equiangular N=4',         seq_eq4,  'C1',      '-'),
     ]
     ref_data     = {lbl: get_filter(seq)     for lbl, seq, _, _ in refs}
     ref_data_fft = {lbl: get_filter_fft(seq) for lbl, seq, _, _ in refs}
@@ -344,7 +353,7 @@ def main():
 
     # ── FOM bar chart ─────────────────────────────────────────────────────────
     all_labels = (
-        ['Ramsey', 'GPS m=1', 'GPS m=8', 'Eq N=4']
+        ['Ramsey', r'QSP $n=2$', 'GPS m=1', 'GPS m=8', 'Eq N=4']
         + [f'QSP n={n}' for n in qsp_ns]
     )
     all_seqs_by_noise = {nlabel: [] for nlabel in noise_labels}

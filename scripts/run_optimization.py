@@ -21,21 +21,24 @@ from quantum_pulse_suite.analysis.pulse_optimizer import (
 
 T            = 2 * np.pi
 OMEGA_FAST   = 20.0 * np.pi
-OMEGA_CUTOFF = 2 * np.pi / T
+OMEGA_CUTOFF = None  # FL-cutoff: 2*pi/T (Fourier limit — matches paper Table I)
 CACHE_PREFIX = 'qsp_opt_cache'
 OUTPUT_DIR   = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 
-OBJECTIVE_MODE   = 'ramsey_normalized'
-OBJECTIVE_WEIGHT = 1.0  # unused for inv_sens_plus_ramsey_noise
+OBJECTIVE_MODE      = 'ramsey_normalized'
+OBJECTIVE_WEIGHT    = 1.0     # unused for ramsey_normalized
+OMEGA_MAX_ANALYTIC  = 4.0 * OMEGA_FAST   # ≈ 251 rad/s — captures pulse-peak tails
+N_OMEGA             = 1024    # frequency quadrature points over [omega_min, OMEGA_MAX_ANALYTIC]
 
 NOISE_SPECS = [
-    ('White',            white_noise_psd()),
-    ('1/f',              one_over_f_psd()),
+    ('White',             white_noise_psd()),
+    ('1/f',               one_over_f_psd()),
+    ('High-pass (w_c=1)', high_pass_psd(omega_c=1.0)),
     ('High-pass (w_c=2)', high_pass_psd(omega_c=2.0)),
 ]
 
-QSP_NS      = [4, 8, 13]
-QSP_BUDGETS = {4: (10, 150, 4), 8: (10, 100, 3), 13: (8, 80, 2)}
+QSP_NS      = [4, 8, 13, 16]
+QSP_BUDGETS = {4: (10, 150, 4), 8: (10, 100, 3), 13: (8, 80, 2), 16: (10, 150, 4)}
 
 
 def _sanitize(label):
@@ -88,6 +91,8 @@ def main():
                 n_restarts=nres, seed=42 + n,
                 n_fft=1024, pad_factor=2,
                 popsize=pop, maxiter=mit,
+                omega_max_analytic=OMEGA_MAX_ANALYTIC,
+                n_omega=N_OMEGA,
             )
             qsp_results[n][nlabel] = r
             print(f'    tau_free={r.tau_free:.4f}  sens={r.sensitivity_sq:.4f}  '

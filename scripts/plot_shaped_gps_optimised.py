@@ -1,6 +1,7 @@
 """
-Optimised pulse-shaped GPS: sweep over operating detuning delta (Step 1),
-then optimise the Fourier envelope shape jointly with delta (Step 2).
+Optimised pulse-shaped GPS: sweep over operating detuning delta (Step 1)
+for fixed envelope shapes, then optimise the Fourier envelope shape at
+delta=0 (Step 2).
 
 Envelope parameterisation
 --------------------------
@@ -11,7 +12,7 @@ Constraints enforced analytically:
   * Omega(0) = Omega(T) = 0  =>  sum_k b_k = 1,
     enforced by setting b_1 = 1 - sum_{k>=2} b_k.
 
-Free parameters for Step 2: (b_2, ..., b_{N_FREE+1}, delta).
+Free parameters for Step 2: (b_2, ..., b_{N_FREE+1}) with delta fixed at 0.
 Non-negativity Omega(t)>=0 is penalised in the objective.
 
 All sequences are discretised into N_DISC constant-Omega segments.
@@ -23,14 +24,20 @@ Objective (FOM)
   minimize  1/sens_sq + noise_var / noise_var_ramsey
 
 where noise_var_ramsey is the Ramsey noise variance for the same noise PSD.
-The objective_mode label 'inv_sens_plus_ramsey_noise' is stored in the cache
+Integration lower cutoff: omega_min = 2*pi/T  (Fourier limit).
+The objective_mode label 'ramsey_normalized' is stored in the cache
 so results from different FOM choices can be identified.
 
 Noise types optimised
 ---------------------
-  white     : S(w) = 1
-  1/f       : S(w) = 1/|w|
-  high-pass : S(w) = theta(|w| - 2)   (omega_c = 2 rad/s)
+  white      : S(w) = 1
+  high-pass1 : S(w) = theta(|w| - 1)   (omega_c = 1 rad/s)
+  high-pass2 : S(w) = theta(|w| - 2)   (omega_c = 2 rad/s)
+
+GPS cases
+---------
+  m=1 : Omega_mean = 1  rad/s,  delta_max = 3
+  m=2 : Omega_mean = 2  rad/s,  delta_max = 6
 """
 
 import sys, time
@@ -48,8 +55,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from quantum_pulse_suite.systems import ThreeLevelClock
 from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
 from quantum_pulse_suite.core.three_level_filter import (
-    fft_three_level_filter, detuning_sensitivity,
-    default_omega_cutoff,
+    fft_three_level_filter, analytic_filter, detuning_sensitivity,
+    default_omega_cutoff, gps_shaped_filter,
 )
 from quantum_pulse_suite.analysis.pulse_optimizer import (
     white_noise_psd, one_over_f_psd, high_pass_psd,
@@ -66,9 +73,12 @@ N_DISC_FIN = 256         # segments for final evaluation
 N_FFT      = 1024        # fft samples during optimisation
 N_FFT_FIN  = 4096        # fft samples for final evaluation
 PAD        = 4
-FREQS_PLOT = np.logspace(-1.5, np.log10(30), 600)
+FREQS_PLOT = np.logspace(-1, np.log10(30), 600)
 N_FREE     = 4           # free Fourier coefficients b_2..b_{N_FREE+1}
-OMEGA_CUTOFF = default_omega_cutoff(T)
+OMEGA_CUTOFF = 2 * np.pi / T   # Fourier limit: 2pi/T = 1.0 rad/s
+
+# Dense log-spaced grid for smooth analytic plot curves
+FREQS_ANA = np.logspace(-1, np.log10(35), 1500)
 
 OBJECTIVE_MODE = 'ramsey_normalized'
 
@@ -78,12 +88,12 @@ CACHE_DIR  = OUTPUT_DIR / 'cache'
 # Noise PSD specs: (cache_key, display_label, S_func)
 NOISE_SPECS = [
     ('white', 'White',              white_noise_psd()),
-    ('1f',    '1/f',               one_over_f_psd()),
+    ('hp1',   'High-pass (wc=1)',  high_pass_psd(omega_c=1.0)),
     ('hp2',   'High-pass (wc=2)',  high_pass_psd(omega_c=2.0)),
 ]
 
 # Deterministic per-noise seed offsets
-_NOISE_SEED_OFFSET = {'white': 0, '1f': 7, 'hp2': 13}
+_NOISE_SEED_OFFSET = {'white': 0, 'hp1': 5, 'hp2': 13}
 
 
 # =============================================================================
@@ -141,6 +151,48 @@ def make_cosine_envelope(b_free):
         phases = 2.0 * np.pi * np.outer(ks, ts) / T_total  # (N, n_pts)
         return omega_mean * (1.0 - b_all @ np.cos(phases))
     return fn
+
+
+def _planck_window(ts, T_total, eps):
+    """Unnormalized Planck-taper weight: 1 on (eps*T, (1-eps)*T), C^inf ramp to 0 at ends."""
+    t  = np.asarray(ts, dtype=float)
+    w  = np.zeros_like(t)
+    t1 = eps * T_total
+
+    # Left ramp: t in (0, eps*T)
+    mask_L = (t > 0) & (t < t1)
+    if np.any(mask_L):
+        u = t[mask_L] / t1                            # u in (0, 1)
+        z = np.clip(1.0 / u - 1.0 / (1.0 - u), -500, 500)
+        w[mask_L] = 1.0 / (1.0 + np.exp(z))
+
+    # Flat center: t in [eps*T, (1-eps)*T]
+    w[(t >= t1) & (t <= T_total - t1)] = 1.0
+
+    # Right ramp: t in ((1-eps)*T, T)
+    mask_R = (t > T_total - t1) & (t < T_total)
+    if np.any(mask_R):
+        u = (T_total - t[mask_R]) / t1
+        z = np.clip(1.0 / u - 1.0 / (1.0 - u), -500, 500)
+        w[mask_R] = 1.0 / (1.0 + np.exp(z))
+
+    return w
+
+
+def envelope_planck_taper(ts, T_total, omega_mean, eps=0.2):
+    """Flat-top C^inf (Planck-taper) envelope.
+
+    Flat at omega_mean on the central (1-2*eps) fraction of [0, T], with a
+    C^inf smooth ramp to zero at each end over a fraction eps.  The amplitude
+    is scaled so that int_0^T Omega(t) dt = omega_mean * T_total (same total
+    rotation as the square envelope).
+    """
+    w = _planck_window(np.asarray(ts, dtype=float), T_total, eps)
+    # Normalise: compute integral over fine grid then rescale
+    t_quad  = np.linspace(0, T_total, 50001)
+    w_quad  = _planck_window(t_quad, T_total, eps)
+    integral = float(np.trapezoid(w_quad, t_quad))
+    return omega_mean * T_total / integral * w
 
 
 # =============================================================================
@@ -328,28 +380,57 @@ def optimise_envelope_delta0(system, omega_mean, S_func, sens_ref_ramsey, noise_
 # Final high-resolution evaluation (all noise types)
 # =============================================================================
 
-def final_eval(system, omega_mean, envelope_fn, delta, label=''):
-    """Evaluate a sequence at high resolution under all noise types."""
+def final_eval(system, omega_mean, envelope_fn, delta, label='', verify=False):
+    """Evaluate a sequence at high resolution under all noise types.
+
+    Uses fft_three_level_filter for numerically stable results (analytic_filter
+    overflows for sequences with many segments).  For delta=0 smooth plot curves,
+    also calls gps_shaped_filter(method='direct') when envelope_fn is given.
+    """
     seq = build_seq(system, omega_mean, envelope_fn, delta, n_disc=N_DISC_FIN)
     _, sens_sq = detuning_sensitivity(seq)
+
+    # FFT filter — numerically stable for 256-segment sequences
     freqs_fft, Fe_fft, _, _ = fft_three_level_filter(
         seq, n_samples=N_FFT_FIN, pad_factor=4, m_y=1.0)
-    mask = freqs_fft >= OMEGA_CUTOFF
+    mask_fft = freqs_fft >= OMEGA_CUTOFF
 
     result = dict(sens_sq=sens_sq, delta=delta)
     for nkey, _, S_func in NOISE_SPECS:
-        if np.count_nonzero(mask) < 2:
+        if np.count_nonzero(mask_fft) < 2:
             noise_var = 0.0
         else:
-            noise_var = float(simpson(Fe_fft[mask] * S_func(freqs_fft[mask]),
-                                      x=freqs_fft[mask]) / (2 * np.pi))
+            noise_var = float(simpson(Fe_fft[mask_fft] * S_func(freqs_fft[mask_fft]),
+                                      x=freqs_fft[mask_fft]) / (2 * np.pi))
         sigma_nu = noise_var / sens_sq if (sens_sq > 1e-20 and noise_var > 0) else np.inf
         result[f'noise_var_{nkey}'] = noise_var
         result[f'sigma_nu_{nkey}']  = sigma_nu
 
-    mask_plot = freqs_fft <= 35.0
-    result['freqs'] = freqs_fft[mask_plot]
-    result['Fe']    = Fe_fft[mask_plot]
+    # For plotting: use gps_shaped_filter direct method at delta=0 for smooth curves;
+    # otherwise fall back to the FFT data already computed.
+    if delta == 0.0 and envelope_fn is not None:
+        freqs_smooth, Fe_smooth = gps_shaped_filter(
+            envelope_fn, T, omega_mean, method='direct',
+            n_samples=16384, pad_factor=4)
+        result['freqs'] = freqs_smooth
+        result['Fe']    = Fe_smooth
+    else:
+        result['freqs'] = freqs_fft
+        result['Fe']    = Fe_fft
+
+    # Optional cross-check: compare FFT vs direct gps_shaped_filter at delta=0
+    if verify and delta == 0.0:
+        freqs_d, Fe_d = gps_shaped_filter(
+            envelope_fn, T, omega_mean, method='direct',
+            n_samples=16384, pad_factor=4)
+        mask_d = freqs_d >= OMEGA_CUTOFF
+        for nkey, _, S_func in NOISE_SPECS:
+            nv_d   = float(simpson(Fe_d[mask_d] * S_func(freqs_d[mask_d]),
+                                   x=freqs_d[mask_d]) / (2 * np.pi))
+            nv_fft = result[f'noise_var_{nkey}']
+            rel    = abs(nv_d - nv_fft) / max(abs(nv_fft), 1e-30)
+            print(f'    [verify {nkey}] direct={nv_d:.6e}  FFT={nv_fft:.6e}  '
+                  f'rel_diff={rel:.4f}')
 
     if label:
         parts = [f'  {label:<46}  sens={sens_sq:.4f}']
@@ -358,6 +439,48 @@ def final_eval(system, omega_mean, envelope_fn, delta, label=''):
         parts.append(f'  d={delta:.4f}')
         print(''.join(parts))
     return result
+
+
+# =============================================================================
+# Method verification: direct vs piecewise gps_shaped_filter
+# =============================================================================
+
+def verify_gps_methods(system, omega_mean, envelope_fn, m_label='',
+                       n_direct=16384, n_piecewise=N_DISC_FIN, pad=PAD):
+    """Compare gps_shaped_filter(method='direct') vs method='piecewise' for delta=0.
+
+    'direct'    uses the commuting-H analytic formula on the continuous envelope.
+    'piecewise' uses fft_three_level_filter on an N_DISC_FIN-segment sequence.
+
+    Prints noise_var for each noise type and the relative difference between
+    the two methods.  Also returns the relative differences as a dict.
+    """
+    # Direct method: continuous envelope, no piecewise approximation
+    freqs_d, Fe_d = gps_shaped_filter(
+        envelope_fn, T, omega_mean, method='direct',
+        n_samples=n_direct, pad_factor=pad)
+
+    # Piecewise method: build a high-res discretised sequence, delegate to FFT
+    seq_pw = build_seq(system, omega_mean, envelope_fn, delta=0.0, n_disc=n_piecewise)
+    freqs_p, Fe_p = gps_shaped_filter(
+        envelope_fn, T, omega_mean, method='piecewise',
+        n_samples=4 * n_piecewise, pad_factor=pad, seq=seq_pw)
+
+    rel_diffs = {}
+    print(f'  gps_shaped_filter method comparison  [{m_label}, delta=0]')
+    hdr = f'    {"noise":<12}  {"direct":>14}  {"piecewise":>14}  {"rel_diff":>10}'
+    print(hdr)
+    for nkey, nlabel, S_func in NOISE_SPECS:
+        mask_d = freqs_d >= OMEGA_CUTOFF
+        mask_p = freqs_p >= OMEGA_CUTOFF
+        nv_d = float(simpson(Fe_d[mask_d] * S_func(freqs_d[mask_d]),
+                             x=freqs_d[mask_d]) / (2 * np.pi))
+        nv_p = float(simpson(Fe_p[mask_p] * S_func(freqs_p[mask_p]),
+                             x=freqs_p[mask_p]) / (2 * np.pi))
+        rel  = abs(nv_d - nv_p) / max(abs(nv_d), 1e-30)
+        rel_diffs[nkey] = rel
+        print(f'    {nlabel:<12}  {nv_d:>14.6e}  {nv_p:>14.6e}  {rel:>10.4f}')
+    return rel_diffs
 
 
 # =============================================================================
@@ -370,14 +493,14 @@ def main():
 
     gps_cases = [
         (1, 2 * np.pi * 1 / T, 3.0),    # (m, omega_mean, delta_max)
-        (8, 2 * np.pi * 8 / T, 24.0),
     ]
     fixed_shapes = [
         ('Square',   envelope_square),
         ('Hann',     envelope_hann),
         ('Blackman', envelope_blackman),
+        ('Planck',   envelope_planck_taper),
     ]
-    _all_names = [s for s, _ in fixed_shapes] + ['Opt', 'Opt0']
+    _all_names = [s for s, _ in fixed_shapes] + ['Opt0']
 
     # cache key lists used for save/load
     _nkeys = [nkey for nkey, _, _ in NOISE_SPECS]
@@ -393,12 +516,23 @@ def main():
     if _cache_path is not None:
         try:
             cache = np.load(str(_cache_path), allow_pickle=True)
-            cached_mode = cache['objective_mode'].item()
-            if cached_mode == OBJECTIVE_MODE:
+            cached_mode   = cache['objective_mode'].item()
+            cached_cutoff = float(cache['omega_cutoff']) if 'omega_cutoff' in cache else -1.0
+            mode_ok   = cached_mode == OBJECTIVE_MODE
+            cutoff_ok = abs(cached_cutoff - OMEGA_CUTOFF) < 1e-10
+            keys_ok   = all(
+                f'm{m}_{nk}_{nm}_sens_sq' in cache
+                for m, _, _ in gps_cases
+                for nk in [nkey for nkey, _, _ in NOISE_SPECS]
+                for nm in [s for s, _ in fixed_shapes] + ['Opt0']
+            )
+            if mode_ok and cutoff_ok and keys_ok:
                 cache_ok = True
-                print(f'Loading cached results from {_cache_path} (mode={cached_mode})')
+                print(f'Loading cached results from {_cache_path} '
+                      f'(mode={cached_mode}, cutoff={cached_cutoff:.2e})')
             else:
-                print(f'Cache mode={cached_mode} != {OBJECTIVE_MODE}. Recomputing.')
+                print(f'Cache mismatch: mode={cached_mode}/{OBJECTIVE_MODE}, '
+                      f'cutoff={cached_cutoff:.2e}/{OMEGA_CUTOFF:.2e}. Recomputing.')
         except Exception as e:
             print(f'Cache load failed ({e}). Recomputing.')
 
@@ -421,9 +555,7 @@ def main():
                     for k in _per_noise_suffixes:
                         r[k] = float(cache[f'{key}_{k}'])
                     results[m][nkey][name] = r
-                opt_params[m][nkey]['opt_b']    = cache[f'm{m}_{nkey}_opt_b']
-                opt_params[m][nkey]['opt_delta'] = float(cache[f'm{m}_{nkey}_opt_delta'])
-                opt_params[m][nkey]['opt0_b']    = cache[f'm{m}_{nkey}_opt0_b']
+                opt_params[m][nkey]['opt0_b'] = cache[f'm{m}_{nkey}_opt0_b']
         print('  Done.')
 
     else:
@@ -431,21 +563,20 @@ def main():
         print('Computing Ramsey baseline ...')
         seq_r = build_ramsey(system)
         _, ramsey_sens_sq = detuning_sensitivity(seq_r)
-        freqs_r, Fe_r, _, _ = fft_three_level_filter(
-            seq_r, n_samples=N_FFT_FIN, pad_factor=4, m_y=1.0)
-        mask_r = freqs_r >= OMEGA_CUTOFF
+        # Use analytic filter for accurate Kubo integrals and smooth plot data
+        _, Fe_r_ana = analytic_filter(seq_r, FREQS_ANA, m_y=1.0)
+        mask_r = FREQS_ANA >= OMEGA_CUTOFF
 
         ramsey_refs = {}
         for nkey, nlabel, S_func in NOISE_SPECS:
-            nv = float(simpson(Fe_r[mask_r] * S_func(freqs_r[mask_r]),
-                               x=freqs_r[mask_r]) / (2 * np.pi))
+            nv = float(simpson(Fe_r_ana[mask_r] * S_func(FREQS_ANA[mask_r]),
+                               x=FREQS_ANA[mask_r]) / (2 * np.pi))
             ramsey_refs[nkey] = nv
             sigma_r = nv / ramsey_sens_sq if (nv > 0 and ramsey_sens_sq > 1e-20) else np.inf
             print(f'  Ramsey [{nlabel}]: sens_sq={ramsey_sens_sq:.4f}  '
                   f'noise_var={nv:.4e}  sigma_nu={sigma_r:.4f}')
-        mask_r_plot = freqs_r <= 35.0
-        ramsey_freqs = freqs_r[mask_r_plot]
-        ramsey_Fe    = Fe_r[mask_r_plot]
+        ramsey_freqs = FREQS_ANA
+        ramsey_Fe    = Fe_r_ana
 
         results    = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
         opt_params = {m: {nk: {} for nk in _nkeys} for m, _, _ in gps_cases}
@@ -463,6 +594,7 @@ def main():
 
                 # Step 1: fixed shapes
                 print('  Step 1 – fixed shapes, optimise delta:')
+                first_verify = True
                 for name, fn in fixed_shapes:
                     d_opt, _ = optimise_delta(
                         system, omega_mean, fn, delta_max,
@@ -470,24 +602,11 @@ def main():
                         label=f'{name} m={m_cyc} [{nlabel}]')
                     results[m_cyc][nkey][name] = final_eval(
                         system, omega_mean, fn, d_opt,
-                        label=f'GPS m={m_cyc}  {name} [{nlabel}]')
+                        label=f'GPS m={m_cyc}  {name} [{nlabel}]',
+                        verify=first_verify)
+                    first_verify = False
 
-                # Step 2: optimise envelope + delta
-                print('  Step 2 – optimise envelope + delta:')
-                t0 = time.time()
-                d_opt, _, fn_opt, b_opt = optimise_envelope(
-                    system, omega_mean, delta_max, S_func, ramsey_sens_sq, noise_ref,
-                    seed=seed_base,
-                    label=f'Opt m={m_cyc} [{nlabel}]',
-                    popsize=12, maxiter=250, n_restarts=4)
-                print(f'    (took {time.time()-t0:.1f}s)')
-                opt_params[m_cyc][nkey]['opt_b']    = b_opt
-                opt_params[m_cyc][nkey]['opt_delta'] = d_opt
-                results[m_cyc][nkey]['Opt'] = final_eval(
-                    system, omega_mean, fn_opt, d_opt,
-                    label=f'GPS m={m_cyc}  Opt [{nlabel}]')
-
-                # Step 2b: optimise envelope at delta=0
+                # Step 2: optimise envelope at delta=0
                 print('  Step 2b – optimise envelope at delta=0:')
                 t0 = time.time()
                 fn_opt0, b_opt0, _ = optimise_envelope_delta0(
@@ -504,6 +623,7 @@ def main():
         # ── Save cache ────────────────────────────────────────────────────────
         d = {
             'objective_mode':  np.array(OBJECTIVE_MODE),
+            'omega_cutoff':    np.array(OMEGA_CUTOFF),
             'ramsey_sens_sq':  np.array(ramsey_sens_sq),
             'ramsey_freqs':    ramsey_freqs,
             'ramsey_Fe':       ramsey_Fe,
@@ -519,9 +639,7 @@ def main():
                         d[f'{key}_{k}'] = np.array(r[k])
                     for k in _per_noise_suffixes:
                         d[f'{key}_{k}'] = np.array(r[k])
-                d[f'm{m_cyc}_{nkey}_opt_b']    = opt_params[m_cyc][nkey]['opt_b']
-                d[f'm{m_cyc}_{nkey}_opt_delta'] = np.array(opt_params[m_cyc][nkey]['opt_delta'])
-                d[f'm{m_cyc}_{nkey}_opt0_b']   = opt_params[m_cyc][nkey]['opt0_b']
+                d[f'm{m_cyc}_{nkey}_opt0_b'] = opt_params[m_cyc][nkey]['opt0_b']
         saved = _save_cache(d)
         print(f'\nCache saved to {saved}')
 
@@ -552,7 +670,7 @@ def main():
     for nkey, nlabel, _ in NOISE_SPECS:
         print(f'\n  [{nlabel}]')
         for m_cyc, _, _ in gps_cases:
-            for name in ['Opt', 'Opt0']:
+            for name in ['Opt0']:
                 r   = results[m_cyc][nkey][name]
                 lbl = f'GPS m={m_cyc}  {name}'
                 row = f'    {lbl:<44}'
@@ -560,76 +678,123 @@ def main():
                     row += f'{r[f"sigma_nu_{nk}"]:>{col_w}.4f}'
                 print(row + f'  delta={r["delta"]:.4f}')
 
-    # ── Filter function plots (one per noise type, showing that noise's optimum) ──
-    for nkey, nlabel, _ in NOISE_SPECS:
-        fig, axes = plt.subplots(1, 2, figsize=(13, 5.5), sharey=True)
+    # ── Recompute filter functions at plotting resolution ─────────────────────
+    # Use gps_shaped_filter(direct) for all GPS curves (delta=0, smooth).
+    # pad_factor=32 -> df = 1/32 ~ 0.031 rad/s, so curves start below 0.05.
+    # n_samples must be a power of 2 for FFT efficiency.
+    m_cyc, omega_mean, _ = gps_cases[0]
 
-        color_map = {'Square': 'C0', 'Hann': 'C9', 'Blackman': 'C1',
-                     'Opt': 'C3', 'Opt0': 'C5'}
-        ls_map    = {'Square': '-',  'Hann': '--', 'Blackman': ':',
-                     'Opt': '-',  'Opt0': '-'}
-        lw_map    = {'Square': 1.8,  'Hann': 2.0, 'Blackman': 2.0,
-                     'Opt': 2.5,  'Opt0': 2.5}
+    PAD_PLOT  = 32
+    N_T_PLOT  = 8192   # time samples; df = 1/pad_factor = 0.031 rad/s
 
-        for ax, (m_cyc, omega_mean, _) in zip(axes, gps_cases):
-            ax.loglog(ramsey_freqs, ramsey_Fe / T**2 + 1e-20,
-                      color='0.55', lw=1.5, label='Ramsey (ref)')
+    _envelope_fns = {
+        'Square':   envelope_square,
+        'Hann':     envelope_hann,
+        'Blackman': envelope_blackman,
+        'Planck':   envelope_planck_taper,
+    }
 
-            for name in _all_names:
-                r     = results[m_cyc][nkey][name]
-                sigma = r[f'sigma_nu_{nkey}']
-                d_str = r'$\delta{=}0$' if name == 'Opt0' else rf'$\delta^*$={r["delta"]:.2f}'
-                lbl   = rf'{name}  {d_str}  $\sigma_{{\nu}}$={sigma:.3f}'
-                ax.loglog(r['freqs'], r['Fe'] / T**2 + 1e-20,
-                          color=color_map[name], lw=lw_map[name],
-                          ls=ls_map[name], label=lbl)
+    plot_freqs, plot_Fe = {}, {}
+    for name in _all_names:
+        if name == 'Opt0':
+            b   = opt_params[m_cyc]['white']['opt0_b']
+            fn  = make_cosine_envelope(b)
+        else:
+            fn = _envelope_fns[name]
+        f, Fe_p = gps_shaped_filter(
+            fn, T, omega_mean, method='direct',
+            n_samples=N_T_PLOT, pad_factor=PAD_PLOT)
+        plot_freqs[name] = f
+        plot_Fe[name]    = Fe_p
 
-            # Inset: envelope shapes (Opt and Opt0 for this noise type)
-            ax_ins = ax.inset_axes([0.62, 0.55, 0.36, 0.38])
-            ts = np.linspace(0, T, 300)
-            ax_ins.plot(ts / np.pi, envelope_square(ts, T, omega_mean) / omega_mean,
-                        color='C0', lw=1.2, ls='-', label='Square')
-            b_opt  = opt_params[m_cyc][nkey]['opt_b']
-            b_opt0 = opt_params[m_cyc][nkey]['opt0_b']
-            fn_opt  = make_cosine_envelope(b_opt)
-            fn_opt0 = make_cosine_envelope(b_opt0)
-            ax_ins.plot(ts / np.pi, fn_opt(ts, T, omega_mean)  / omega_mean,
-                        color='C3', lw=2.0, ls='-', label='Opt')
-            ax_ins.plot(ts / np.pi, fn_opt0(ts, T, omega_mean) / omega_mean,
-                        color='C5', lw=2.0, ls='-', label=r'Opt$\delta{=}0$')
-            ax_ins.set_xlabel(r'$t/\pi$', fontsize=7)
-            ax_ins.set_ylabel(r'$\Omega/\bar\Omega$', fontsize=7)
-            ax_ins.tick_params(labelsize=6)
-            ax_ins.set_xlim(0, 2);  ax_ins.set_ylim(bottom=0)
-            ax_ins.legend(fontsize=5.5, loc='upper center')
-            ax_ins.grid(True, alpha=0.3)
+    # Ramsey: analytic filter on log-spaced grid for smooth log-log curve
+    FREQS_RAMSEY_PLOT = np.logspace(np.log10(0.04), np.log10(32), 3000)
+    seq_r_plot = build_ramsey(system)
+    _, Fe_ramsey_plot = analytic_filter(seq_r_plot, FREQS_RAMSEY_PLOT, m_y=1.0)
 
-            for k in range(1, 6):
-                if omega_mean * k <= 30:
-                    ax.axvline(omega_mean * k, color='0.7', lw=0.5, ls=':', alpha=0.5)
+    # ── PRA-standard plot style ───────────────────────────────────────────────
+    matplotlib.rcParams.update({
+        'font.family':       'serif',
+        'font.size':          8,
+        'axes.labelsize':     9,
+        'axes.titlesize':     8,
+        'xtick.labelsize':    7,
+        'ytick.labelsize':    7,
+        'legend.fontsize':    7,
+        'legend.framealpha': 0.9,
+        'legend.edgecolor':  '0.7',
+        'lines.linewidth':    1.4,
+        'axes.linewidth':     0.6,
+        'xtick.major.width':  0.6,
+        'ytick.major.width':  0.6,
+        'xtick.minor.width':  0.4,
+        'ytick.minor.width':  0.4,
+        'xtick.direction':   'in',
+        'ytick.direction':   'in',
+    })
 
-            ax.set_xlim([FREQS_PLOT[0], 30]);  ax.set_ylim([1e-9, 1.5])
-            ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)', fontsize=11)
-            ax.set_title(rf'GPS $m{{=}}{m_cyc}$  ($\bar\Omega={omega_mean:.1f}$)',
-                         fontsize=11)
-            ax.grid(True, alpha=0.3, which='both')
-            ax.legend(fontsize=7.5, loc='lower left')
+    # ── Single figure: GPS m=1 filter functions (white noise) ────────────────
+    fig, ax = plt.subplots(figsize=(3.375, 3.0))
 
-        axes[0].set_ylabel(r'$F_e(\omega)\,/\,T^2$', fontsize=11)
-        fig.suptitle(
-            rf'Pulse-shaped GPS: filter functions optimised for {nlabel} noise'
-            '\n'
-            r'FOM = $1/S^2 + \sigma^2_\nu/\sigma^2_{\nu,\rm Ramsey}$  '
-            r'($N_{\rm free}=' + str(N_FREE) + r'$ cosine terms)',
-            fontsize=10)
-        fig.tight_layout()
+    ax.loglog(FREQS_RAMSEY_PLOT, Fe_ramsey_plot / T**2 + 1e-20,
+              color='0.5', lw=1.5, ls='--',
+              label=rf'Ramsey  $\sigma_{{\nu}}={ramsey_refs["white"]/ramsey_sens_sq:.3f}$')
 
-        suffix = nkey.replace('/', 'f')
-        for ext in ['pdf', 'png']:
-            path = OUTPUT_DIR / f'shaped_gps_optimised_{suffix}.{ext}'
-            fig.savefig(path, dpi=300, bbox_inches='tight')
-            print(f'Saved: {path}')
-        plt.close(fig)
+    color_map = {'Square': 'C0', 'Hann': 'C9', 'Blackman': 'C1', 'Planck': 'C4', 'Opt0': 'C3'}
+    ls_map    = {'Square': '-',  'Hann': '--', 'Blackman': ':',  'Planck': '-.',  'Opt0': '-'}
+    lw_map    = {'Square': 1.8,  'Hann': 2.0, 'Blackman': 2.0,  'Planck': 2.0,   'Opt0': 2.5}
+
+    for name in _all_names:
+        sigma = results[m_cyc]['white'][name]['sigma_nu_white']
+        lbl   = rf'{name}  $\sigma_{{\nu}}={sigma:.3f}$'
+        ax.loglog(plot_freqs[name], plot_Fe[name] / T**2 + 1e-20,
+                  color=color_map[name], lw=lw_map[name],
+                  ls=ls_map[name], label=lbl)
+
+    # Asymptotic slope guides
+    w_lo = np.array([2.5, 7.0])
+    ax.loglog(w_lo, 2e-2 * (w_lo / 2.5) ** (-4),  color='0.65', lw=0.9, ls=':', alpha=0.8)
+    ax.loglog(w_lo, 2e-2 * (w_lo / 2.5) ** (-12), color='0.65', lw=0.9, ls=':', alpha=0.8)
+    ax.text(4.2, 2e-2 * (4.2 / 2.5) ** (-4)  * 2.2, r'$\omega^{-4}$',  fontsize=8, color='0.5')
+    ax.text(3.8, 2e-2 * (3.8 / 2.5) ** (-12) * 0.3, r'$\omega^{-12}$', fontsize=8, color='0.5')
+
+    # Inset: envelope shapes
+    ax_ins = ax.inset_axes([0.12, 0.35, 0.28, 0.28])
+    ts = np.linspace(0, T, 500)
+    ax_ins.plot(ts / np.pi, envelope_square(ts, T, omega_mean) / omega_mean,
+                color='C0', lw=1.2, ls='-',  label='Square')
+    ax_ins.plot(ts / np.pi, envelope_hann(ts, T, omega_mean) / omega_mean,
+                color='C9', lw=1.5, ls='--', label='Hann')
+    ax_ins.plot(ts / np.pi, envelope_blackman(ts, T, omega_mean) / omega_mean,
+                color='C1', lw=1.5, ls=':',  label='Blackman')
+    ax_ins.plot(ts / np.pi, envelope_planck_taper(ts, T, omega_mean) / omega_mean,
+                color='C4', lw=1.5, ls='-.', label='Planck')
+    b_opt0  = opt_params[m_cyc]['white']['opt0_b']
+    fn_opt0 = make_cosine_envelope(b_opt0)
+    ax_ins.plot(ts / np.pi, fn_opt0(ts, T, omega_mean) / omega_mean,
+                color='C3', lw=2.0, ls='-',  label='Opt0')
+    ax_ins.set_xlabel(r'$t/\pi$')
+    ax_ins.set_ylabel(r'$\Omega/\bar\Omega$')
+    ax_ins.tick_params(which='both', labelsize=6)
+    ax_ins.set_xlim(0, 2)
+    ax_ins.set_ylim(bottom=0)
+    ax_ins.grid(True, alpha=0.3)
+
+    ax.set_ylim([1e-9, 1.5])
+    ax.set_xlabel(r'$\omega$ (rad s$^{-1}$)')
+    ax.set_ylabel(r'$\mathcal{F}_e(\omega)\,/\,T^2$')
+    ax.grid(True, alpha=0.3, which='both')
+    ax.tick_params(which='both', top=True, right=True)
+    ax.legend(loc='lower left')
+    fig.tight_layout()
+    x_min = float(FREQS_RAMSEY_PLOT[0])
+    ax.set_xlim([x_min, 30])
+
+    for ext in ['pdf', 'png']:
+        path = OUTPUT_DIR / f'shaped_gps_filter_functions.{ext}'
+        fig.savefig(path, dpi=300, bbox_inches='tight')
+        print(f'Saved: {path}')
+    plt.close(fig)
 
 
 if __name__ == '__main__':

@@ -13,7 +13,8 @@ Models two realistic atomic-clock noise scenarios:
      vibration) at a specific frequency.  GPS m=8 has nulls at ω = 8k; if the
      peak falls on one of those nulls the GPS protocol suppresses it entirely.
 
-Both figures share the same four protocols as the main protocol comparison.
+Equiangular N=4/8/16 and QSP n=4/8/13 are loaded from the latest caches
+(white-noise optimised sequences, same as protocol_comparison.py).
 """
 
 import sys
@@ -30,16 +31,49 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from quantum_pulse_suite.systems import ThreeLevelClock
 from quantum_pulse_suite.core.multilevel import MultiLevelPulseSequence
 from quantum_pulse_suite.core.three_level_filter import (
-    fft_three_level_filter,
+    analytic_filter,
     detuning_sensitivity,
 )
+from quantum_pulse_suite.analysis.pulse_optimizer import build_qsp_3level
+
+matplotlib.rcParams.update({
+    'font.family':       'serif',
+    'font.size':          8,
+    'axes.labelsize':     9,
+    'axes.titlesize':     8,
+    'xtick.labelsize':    7,
+    'ytick.labelsize':    7,
+    'legend.fontsize':    6.5,
+    'legend.framealpha': 0.9,
+    'legend.edgecolor':  '0.7',
+    'lines.linewidth':    1.4,
+    'axes.linewidth':     0.6,
+    'xtick.major.width':  0.6,
+    'ytick.major.width':  0.6,
+    'xtick.minor.width':  0.4,
+    'ytick.minor.width':  0.4,
+    'xtick.direction':   'in',
+    'ytick.direction':   'in',
+})
 
 T          = 2 * np.pi
 OMEGA_FAST = 20 * np.pi
 OMEGA_GPS1 = 2 * np.pi * 1 / T   # = 1.0
 OMEGA_GPS8 = 2 * np.pi * 8 / T   # = 8.0
-N_FFT      = 4 * 4096
-PAD_FACTOR = 16   # extra padding for better high-freq resolution
+
+EQ_NS  = [4, 8, 16]
+QSP_NS = [4, 8, 13]
+EQ_COLORS  = ['#E07020', '#C04000', '#802000']
+QSP_COLORS = ['#2090D0', '#1060A0', '#083070']
+
+def _sanitize(label):
+    return label.replace('/', 'f').replace(' ', '_').replace('(', '').replace(')', '').replace('=', '')
+
+# Analytic frequency grid: fine enough for accurate Kubo integrals
+# Use log-spacing from near-DC to capture the full filter function
+OMEGA_ANA_MIN = 1e-4
+OMEGA_ANA_MAX = 60.0
+N_ANA         = 8000
 
 OUTPUT_DIR = Path(__file__).parent.parent / 'figures' / 'qubit_performance_plots'
 
@@ -75,194 +109,198 @@ def build_equiangular(system, omega, phases):
     return seq
 
 
+def build_double_pi_qsp(system):
+    """QSP n=2: theta=[pi,pi], phi=[0,0] — maximises DC sensitivity."""
+    return build_qsp_3level(system, T, 2, [np.pi, np.pi], [0.0, 0.0], OMEGA_FAST)
+
+
 # =============================================================================
-# FOM helpers
+# sigma_nu helpers  (lower is better)
 # =============================================================================
 
-def fom_highpass(freqs, Fe, sens_sq, cutoff):
-    """FOM with S(ω) = 1 for ω ≥ cutoff, else 0."""
+def sigma_nu_highpass(freqs, Fe, sens_sq, cutoff):
+    """sigma_nu with S(ω) = 1 for ω ≥ cutoff, else 0."""
     mask = freqs >= cutoff
     if mask.sum() < 2:
-        return np.inf
-    kubo = float(simpson(Fe[mask], x=freqs[mask]) / (2 * np.pi))
-    return sens_sq / kubo if kubo > 0 else np.inf
+        return 0.0
+    noise_var = float(simpson(Fe[mask], x=freqs[mask]) / (2 * np.pi))
+    return noise_var / sens_sq if sens_sq > 0 else np.inf
 
 
-def fom_lorentzian(freqs, Fe, sens_sq, omega_peak, width=0.5):
-    """FOM with a Lorentzian noise peak: S(ω) = 1/((ω-ω_peak)^2 + width^2)."""
+def sigma_nu_lorentzian(freqs, Fe, sens_sq, omega_peak, width=0.5):
+    """sigma_nu with a Lorentzian noise peak: S(ω) = 1/((ω-ω_peak)²+width²)."""
     S = 1.0 / ((freqs - omega_peak)**2 + width**2)
-    kubo = float(simpson(Fe * S, x=freqs) / (2 * np.pi))
-    return sens_sq / kubo if kubo > 0 else np.inf
+    noise_var = float(simpson(Fe * S, x=freqs) / (2 * np.pi))
+    return noise_var / sens_sq if sens_sq > 0 else np.inf
 
 
 # =============================================================================
 # Main
 # =============================================================================
 
-def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    system = ThreeLevelClock()
+# (eq_cache_key, qsp_noise_label, file_suffix, display_label)
+NOISE_VARIANTS = [
+    ('highpass2', 'High-pass (w_c=2)', '',    'high-pass'),
+    ('1f',        '1/f',              '_1f',  r'$1/f$'),
+]
 
-    # ── Build sequences ───────────────────────────────────────────────────────
-    print('Building Ramsey ...')
-    seq_R = build_ramsey(system)
 
-    print('Building GPS m=1 (delta=0) ...')
-    seq_G1 = build_gps(system, OMEGA_GPS1)
-
-    print('Building GPS m=8 (delta=0) ...')
-    seq_G8 = build_gps(system, OMEGA_GPS8)
-
-    print('Loading equiangular N=4 (white noise) from cache ...')
-    eq_caches  = sorted(OUTPUT_DIR.glob('equiangular_opt_cache_*.npz'))
-    if not eq_caches:
-        raise FileNotFoundError(f'No equiangular_opt_cache_*.npz in {OUTPUT_DIR}')
-    eq_cache   = np.load(eq_caches[-1], allow_pickle=True)
-    omega_eq4  = float(eq_cache['eq_N4_white_omega'])
-    phases_eq4 = eq_cache['eq_N4_white_phases']
-    seq_eq4    = build_equiangular(system, omega_eq4, phases_eq4)
-    print(f'  Cache: {eq_caches[-1].name}')
-    print(f'  Omega*T = {omega_eq4 * T:.4f},  phases = '
-          f'{np.array2string(phases_eq4, precision=3, separator=", ")}')
-
-    # ── Compute filter functions (high-res) ───────────────────────────────────
-    print('\nComputing filter functions ...')
+def _build_protocols(system, seq_R, seq_G1, seq_G8, seq_dpi,
+                     eq_cache, qsp_cache, eq_key, qsp_label):
     protocols = [
-        ('Ramsey',          seq_R,  'C3', '-'),
-        ('GPS $m{=}1$',     seq_G1, 'C0', '-'),
-        ('GPS $m{=}8$',     seq_G8, 'C2', '-'),
-        ('Equiangular $N{=}4$', seq_eq4, 'C1', '-'),
+        ('Ramsey',                    seq_R,   'C3',      '-',  2.0),
+        (r'QSP $n{=}2$ ($2\pi$-R)',  seq_dpi, '#9B30FF', ':',  2.0),
+        ('GPS $m{=}1$',               seq_G1,  'C0',      '-',  2.0),
+        ('GPS $m{=}8$',               seq_G8,  'C2',      '-',  2.0),
     ]
+    for N, color in zip(EQ_NS, EQ_COLORS):
+        omega  = float(eq_cache[f'eq_N{N}_{eq_key}_omega'])
+        phases = np.asarray(eq_cache[f'eq_N{N}_{eq_key}_phases'], dtype=float)
+        seq    = build_equiangular(system, omega, phases)
+        protocols.append((rf'Eq $N{{={N}}}$', seq, color, '-', 1.8))
+    if qsp_cache is not None:
+        for n, color in zip(QSP_NS, QSP_COLORS):
+            k = f'qsp_n{n}_{_sanitize(qsp_label)}'
+            if f'{k}_thetas' not in qsp_cache:
+                print(f'  WARNING: {k}_thetas missing, skipping n={n}')
+                continue
+            seq = build_qsp_3level(
+                system, T, n,
+                qsp_cache[f'{k}_thetas'], qsp_cache[f'{k}_phis'],
+                float(qsp_cache[f'{k}_omega_fast']))
+            protocols.append((rf'QSP $n{{={n}}}$', seq, color, '--', 1.8))
+    return protocols
 
-    data = {}
-    for label, seq, color, ls in protocols:
-        _, sens_sq = detuning_sensitivity(seq)
-        freqs, Fe, _, _ = fft_three_level_filter(
-            seq, n_samples=N_FFT, pad_factor=PAD_FACTOR, m_y=1.0)
-        data[label] = dict(sens_sq=sens_sq, freqs=freqs, Fe=Fe,
-                           color=color, ls=ls)
-        kubo_w = float(simpson(Fe, x=freqs) / (2 * np.pi))
-        print(f'  {label:<26}  sens={sens_sq:.4f}  kubo_w={kubo_w:.4f}'
-              f'  FOM_w={sens_sq/kubo_w:.2f}')
 
-    # =========================================================================
-    # Figure 1: FOM vs high-pass cutoff  ω_c
-    # =========================================================================
-    cutoffs = np.linspace(0.0, 28.0, 500)
+def _make_figures(protocols, data, file_suffix, opt_label):
+    cutoffs     = np.linspace(0.0, 28.0, 500)
+    omega_peaks = np.linspace(0.1, 28.0, 500)
+    width       = 0.3
 
-    fig1, ax1 = plt.subplots(figsize=(8.5, 5.5))
-
-    for label, _, color, ls in protocols:
-        d = data[label]
-        foms = [fom_highpass(d['freqs'], d['Fe'], d['sens_sq'], wc)
-                for wc in cutoffs]
-        foms = np.array(foms)
-        # Clip very large values for legibility
-        foms = np.clip(foms, 0, 1000)
-        ax1.semilogy(cutoffs, foms, color=color, lw=2, ls=ls, label=label)
-
-    # Mark GPS m=8 harmonic nulls
+    # Figure 1: high-pass cutoff sweep
+    fig1, ax1 = plt.subplots(figsize=(3.375, 2.8))
+    for label, _, color, ls, lw in protocols:
+        d    = data[label]
+        snus = np.array([sigma_nu_highpass(d['freqs'], d['Fe'], d['sens_sq'], wc)
+                         for wc in cutoffs])
+        ax1.semilogy(cutoffs, np.clip(snus, 1e-8, None),
+                     color=color, lw=lw, ls=ls, label=label)
     for k in range(1, 5):
         wk = OMEGA_GPS8 * k
         if wk <= 28:
             ax1.axvline(wk, color='C2', lw=0.8, ls=':', alpha=0.5)
-            ax1.text(wk + 0.15, 2.0, f'$8{k}$', color='C2',
-                     fontsize=7, va='bottom')
-
-    ax1.set_xlabel(r'Noise cutoff $\omega_c$ (rad s$^{-1}$)', fontsize=12)
-    ax1.set_ylabel(r'FOM $= |\partial_\delta S|^2 / \mathcal{K}(\omega_c)$',
-                   fontsize=12)
+            ax1.text(wk + 0.15, 1e-6, f'$8\\cdot{k}$', color='C2', fontsize=6, va='bottom')
+    ax1.set_xlabel(r'Noise cutoff $\omega_c$ (rad s$^{-1}$)')
+    ax1.set_ylabel(r'$\sigma^2_\nu(\omega_c)$')
     ax1.set_title(
-        r'FOM under high-pass white noise $S(\omega) = \theta(\omega - \omega_c)$'
-        '\n'
-        r'All protocols at $\delta = 0$, $T = 2\pi$',
-        fontsize=11)
+        r'$\sigma^2_\nu$ under high-pass noise $S(\omega)=\theta(\omega-\omega_c)$'
+        f'\n({opt_label}-noise opt., lower is better)')
     ax1.set_xlim([0, 28])
-    ax1.set_ylim([5, 1000])
     ax1.grid(True, alpha=0.3, which='both')
-    ax1.legend(fontsize=9)
+    ax1.tick_params(which='both', top=True, right=True)
+    ax1.legend()
     fig1.tight_layout()
-
     for ext in ['pdf', 'png']:
-        path = OUTPUT_DIR / f'hf_noise_fom_vs_cutoff.{ext}'
+        path = OUTPUT_DIR / f'hf_noise_fom_vs_cutoff{file_suffix}.{ext}'
         fig1.savefig(path, dpi=300, bbox_inches='tight')
         print(f'Saved: {path}')
 
-    # =========================================================================
-    # Figure 2: FOM vs Lorentzian noise peak position ω_peak
-    # =========================================================================
-    omega_peaks = np.linspace(0.1, 28.0, 500)
-    width = 0.3  # Lorentzian half-width
-
-    fig2, ax2 = plt.subplots(figsize=(8.5, 5.5))
-
-    for label, _, color, ls in protocols:
-        d = data[label]
-        foms = [fom_lorentzian(d['freqs'], d['Fe'], d['sens_sq'],
-                               wp, width=width)
-                for wp in omega_peaks]
-        foms = np.clip(np.array(foms), 0, 5000)
-        ax2.semilogy(omega_peaks, foms, color=color, lw=2, ls=ls, label=label)
-
-    # Mark GPS m=8 harmonics
+    # Figure 2: Lorentzian peak sweep
+    fig2, ax2 = plt.subplots(figsize=(3.375, 2.8))
+    for label, _, color, ls, lw in protocols:
+        d    = data[label]
+        snus = np.array([sigma_nu_lorentzian(d['freqs'], d['Fe'], d['sens_sq'], wp, width=width)
+                         for wp in omega_peaks])
+        ax2.semilogy(omega_peaks, np.clip(snus, 1e-8, None),
+                     color=color, lw=lw, ls=ls, label=label)
     for k in range(1, 5):
         wk = OMEGA_GPS8 * k
         if wk <= 28:
             ax2.axvline(wk, color='C2', lw=0.8, ls=':', alpha=0.5)
-
-    # Mark GPS m=1 harmonics
     for k in range(1, 10):
         wk = OMEGA_GPS1 * k
         if wk <= 28:
             ax2.axvline(wk, color='C0', lw=0.5, ls=':', alpha=0.3)
-
-    ax2.set_xlabel(r'Noise peak $\omega_{\rm peak}$ (rad s$^{-1}$)', fontsize=12)
-    ax2.set_ylabel(r'FOM $= |\partial_\delta S|^2 / \mathcal{K}(S_{\rm Lorentz})$',
-                   fontsize=12)
+    ax2.set_xlabel(r'Noise peak $\omega_{\rm peak}$ (rad s$^{-1}$)')
+    ax2.set_ylabel(r'$\sigma^2_\nu$')
     ax2.set_title(
-        rf'FOM under a Lorentzian noise peak (half-width $\Gamma = {width}$)'
-        '\n'
-        r'All protocols at $\delta = 0$, $T = 2\pi$'
-        '\n'
-        r'Dotted lines: GPS $m{=}8$ harmonics (green), GPS $m{=}1$ harmonics (blue)',
-        fontsize=10)
+        rf'$\sigma^2_\nu$ under Lorentzian noise ($\Gamma={width}$)'
+        f'\n({opt_label}-noise opt., lower is better)')
     ax2.set_xlim([0, 28])
-    ax2.set_ylim([1, 5000])
     ax2.grid(True, alpha=0.3, which='both')
-    ax2.legend(fontsize=9)
+    ax2.tick_params(which='both', top=True, right=True)
+    ax2.legend()
     fig2.tight_layout()
-
     for ext in ['pdf', 'png']:
-        path = OUTPUT_DIR / f'hf_noise_lorentzian.{ext}'
+        path = OUTPUT_DIR / f'hf_noise_lorentzian{file_suffix}.{ext}'
         fig2.savefig(path, dpi=300, bbox_inches='tight')
         print(f'Saved: {path}')
 
     plt.close('all')
 
-    # ── Print FOM table at key cutoffs ────────────────────────────────────────
-    print('\n--- FOM under high-pass white noise at key cutoffs ---')
+    # Print tables
     key_cutoffs = [0.0, 1.0, 4.0, 8.0, 16.0]
-    hdr = f'{"Protocol":<26} ' + ' '.join(f'ω_c={wc:>4.0f}' for wc in key_cutoffs)
-    print(hdr)
-    print('-' * len(hdr))
-    for label, _, _, _ in protocols:
+    print(f'\n--- sigma_nu (high-pass sweep) [{opt_label} opt] ---')
+    hdr = f'{"Protocol":<34} ' + ' '.join(f'ω_c={wc:>4.0f}' for wc in key_cutoffs)
+    print(hdr); print('-' * len(hdr))
+    for label, *_ in protocols:
         d = data[label]
-        vals = [fom_highpass(d['freqs'], d['Fe'], d['sens_sq'], wc)
-                for wc in key_cutoffs]
-        row = f'{label:<26} ' + ' '.join(f'{v:>10.2f}' for v in vals)
-        print(row)
+        vals = [sigma_nu_highpass(d['freqs'], d['Fe'], d['sens_sq'], wc) for wc in key_cutoffs]
+        print(f'{label:<34} ' + ' '.join(f'{v:>10.4e}' for v in vals))
 
-    print('\n--- FOM under Lorentzian noise at GPS m=8 harmonics ---')
-    hdr2 = f'{"Protocol":<26} ' + ' '.join(f'ω={wk:>4.0f}' for wk in [8, 16, 24])
-    print(hdr2)
-    print('-' * len(hdr2))
-    for label, _, _, _ in protocols:
+    print(f'\n--- sigma_nu (Lorentzian at GPS m=8 harmonics) [{opt_label} opt] ---')
+    hdr2 = f'{"Protocol":<34} ' + ' '.join(f'ω={wk:>4.0f}' for wk in [8, 16, 24])
+    print(hdr2); print('-' * len(hdr2))
+    for label, *_ in protocols:
         d = data[label]
-        vals = [fom_lorentzian(d['freqs'], d['Fe'], d['sens_sq'],
-                               float(wk), width=width)
+        vals = [sigma_nu_lorentzian(d['freqs'], d['Fe'], d['sens_sq'], float(wk), width=width)
                 for wk in [8, 16, 24]]
-        row = f'{label:<26} ' + ' '.join(f'{v:>10.2f}' for v in vals)
-        print(row)
+        print(f'{label:<34} ' + ' '.join(f'{v:>10.4e}' for v in vals))
+
+
+def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    system = ThreeLevelClock()
+
+    print('Building fixed sequences ...')
+    seq_R   = build_ramsey(system)
+    seq_G1  = build_gps(system, OMEGA_GPS1)
+    seq_G8  = build_gps(system, OMEGA_GPS8)
+    seq_dpi = build_double_pi_qsp(system)
+
+    eq_caches = sorted(OUTPUT_DIR.glob('equiangular_opt_cache_*.npz'))
+    if not eq_caches:
+        raise FileNotFoundError(f'No equiangular_opt_cache_*.npz in {OUTPUT_DIR}')
+    eq_cache = np.load(eq_caches[-1], allow_pickle=True)
+    print(f'Equiangular cache: {eq_caches[-1].name}')
+
+    qsp_caches = sorted(OUTPUT_DIR.glob('qsp_opt_cache_*.npz'))
+    qsp_cache  = np.load(qsp_caches[-1], allow_pickle=True) if qsp_caches else None
+    if qsp_cache is not None:
+        print(f'QSP cache:         {qsp_caches[-1].name}')
+    else:
+        print('WARNING: no QSP cache — QSP n>2 omitted.')
+
+    freqs_ana = np.logspace(np.log10(OMEGA_ANA_MIN), np.log10(OMEGA_ANA_MAX), N_ANA)
+
+    for eq_key, qsp_label, file_suffix, opt_label in NOISE_VARIANTS:
+        print(f'\n{"="*60}')
+        print(f'Noise variant: {opt_label}  (eq_key={eq_key}, suffix="{file_suffix}")')
+        print(f'{"="*60}')
+
+        protocols = _build_protocols(system, seq_R, seq_G1, seq_G8, seq_dpi,
+                                     eq_cache, qsp_cache, eq_key, qsp_label)
+
+        data = {}
+        for label, seq, color, ls, lw in protocols:
+            _, sens_sq = detuning_sensitivity(seq)
+            _, Fe = analytic_filter(seq, freqs_ana, m_y=1.0)
+            data[label] = dict(sens_sq=sens_sq, freqs=freqs_ana, Fe=Fe,
+                               color=color, ls=ls, lw=lw)
+            snu_w = float(simpson(Fe, x=freqs_ana) / (2 * np.pi)) / sens_sq
+            print(f'  {label:<32}  sens={sens_sq:.4f}  sigma_nu_w={snu_w:.4e}')
+
+        _make_figures(protocols, data, file_suffix, opt_label)
 
 
 if __name__ == '__main__':
