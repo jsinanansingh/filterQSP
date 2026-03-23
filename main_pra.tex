@@ -57,39 +57,32 @@
 
 \begin{abstract}
 
-Optical atomic clocks require pulse sequences that simultaneously maximize frequency
-sensitivity and suppress technical noise---laser phase fluctuations, vibrations,
-and magnetic field drifts---within the interrogation bandwidth.
-Existing protocols such as Ramsey spectroscopy, composite pulses, and Global Phase
-Spectroscopy (GPS) have been analyzed in isolation, with no unified framework for
-comparing or optimizing them across different noise environments.
-We introduce \emph{temporal Quantum Signal Processing} (temporal QSP), an extension
-of canonical QSP to continuous-time interrogation sequences, which maps the
-alternating structure of clock pulse sequences onto the polynomial algebra of QSP
-and yields closed-form expressions for both the frequency sensitivity and the noise
-filter function for any protocol on two-level and three-level $\Lambda$-clock systems.
-
-A central result is a \emph{DC consistency condition} linking the filter function
-at zero frequency to the squared signal slope, which shows that sensitivity and
-noise suppression are not independently tunable.
-This motivates a natural \emph{figure of merit}---the normalized frequency variance
-$\sigma^2_\nu$, the ratio of integrated noise power passed by the filter function
-to the squared signal slope---that simultaneously captures both dimensions of clock
-performance and directly governs the prefactor of the Allan deviation.
-Unlike prior filter-function analyses aimed at quantum memory or decoherence
-suppression, which optimize noise rejection without regard to signal sensitivity,
-the temporal QSP framework keeps both quantities in view.
+We introduce \emph{temporal Quantum Signal Processing} (temporal QSP), a unified
+analytical framework that places Ramsey spectroscopy, Global Phase Spectroscopy,
+composite equiangular sequences, and pulsed QSP protocols on a common algebraic
+footing for atomic clock optimization.
+The framework yields closed-form filter functions and signal sensitivities for any
+pulse sequence on two-level and three-level $\Lambda$-clock systems, enabling
+principled comparison and optimization across noise environments.
+A key structural result---the \emph{DC consistency condition}---establishes that the
+filter function at zero frequency is identically equal to the squared signal slope,
+so noise suppression and frequency sensitivity are not independently tunable.
+This constraint motivates a natural figure of merit, the normalized frequency variance
+$\sigma^2_\nu$ (ratio of integrated noise power passed by the filter to the squared
+signal slope), which simultaneously captures both dimensions of clock performance and
+directly governs the prefactor of the Allan deviation.
 
 Within this framework we establish a quantitative performance hierarchy.
-Multi-segment equiangular drives and pulsed QSP sequences, optimized against
-noise-matched figures of merit, achieve $\sigma^2_\nu$ up to $3$--$4\times$ lower
-than two-level Ramsey spectroscopy under white and $1/f$ noise.
-The smoothness of the drive envelope is shown analytically to govern the
-high-frequency roll-off of the filter function, connecting pulse-shaping choices
-directly to noise rejection in specific spectral bands.
-Global Phase Spectroscopy is identified as near-optimal for band-limited high-pass
-noise through a spectral concentration mechanism, and pulsed QSP sequences are
-shown to recover the full sensitivity of two-level Ramsey in the three-level system.
+Optimized equiangular and pulsed QSP sequences achieve $\sigma^2_\nu$ three to four
+times lower than two-level Ramsey under white and $1/f$ noise, with pulsed QSP
+additionally recovering the full DC sensitivity of two-level Ramsey in the three-level
+system.
+For band-limited high-pass noise, Global Phase Spectroscopy is near-optimal through
+a spectral sparsity mechanism, reaching roughly $60\times$ lower $\sigma^2_\nu$ than
+Ramsey when the noise cutoff exceeds the drive frequency.
+The boundary smoothness of the drive envelope is shown analytically to determine
+the filter function's high-frequency roll-off, providing a direct, closed-form
+connection between pulse-shaping choices and out-of-band noise rejection.
 All results are validated by exact filter-function calculations and Monte Carlo
 simulations, with analytical conditions for the validity of the linear-response
 approximation derived and verified numerically.
@@ -236,7 +229,7 @@ We address the following central questions in clock protocol design:
         noise; optimized QSP sequences ($n=4,8,13$) achieve $3$--$4\times$ lower under
         both white and $1/f$ noise.
         GPS $m=1$ is near-optimal for high-pass band-limited environments, achieving
-        $\sim60\times$ reduction relative to Ramsey when the noise spectrum lies below
+        $\sim60\times$ reduction relative to Ramsey when the noise cutoff exceeds
         the drive frequency---an effect arising from spectral sparsity of the filter
         function rather than from asymptotic roll-off.
 
@@ -437,6 +430,31 @@ falls with increasing $\omega$.  The overlap integral~\eqref{eq:noise_var_genera
 minimized by making $\mathcal{F}_e(\omega)$ small at low frequencies.
 For high-pass environments, a protocol whose filter function is concentrated \emph{below}
 the cutoff $\omega_c$ achieves nearly perfect noise rejection.
+
+These noise models are also proxies for the \emph{Dick effect}~\cite{Dick1987,Santarelli1998},
+which arises whenever the clock has dead time ($T_c > T$, e.g., for laser cooling or
+state preparation).
+During dead time the local oscillator (LO) runs freely, and the periodic interrogation
+samples the LO phase noise at harmonics of the repetition rate $2\pi/T_c$.
+The aliased noise drives shot-to-shot frequency fluctuations with variance
+\be
+  \sigma^2_{\nu,\mathrm{Dick}} \propto
+    \sum_{n=1}^{\infty} \frac{\mathcal{F}_e(2\pi n/T_c)}{\mathcal{F}_e(0)}\,
+    S_\beta\!\left(\frac{2\pi n}{T_c}\right),
+  \label{eq:dick}
+\ee
+a discrete analogue of the FOM integral~\eqref{eq:fom}: the same filter function
+that governs in-band Kubo noise also controls how strongly each aliasing harmonic
+couples to the clock.
+Faster high-frequency roll-off of $\mathcal{F}_e$ suppresses higher harmonics in
+Eq.~\eqref{eq:dick} more strongly, directly reducing the Dick-limited instability.
+In the flat-spectrum (white-noise) case, Eq.~\eqref{eq:dick} reduces to a
+sum over $\mathcal{F}_e$ evaluated at harmonics $2\pi n/T_c$, making the white-noise
+FOM the natural worst-case bound for Dick-effect suppression.
+The high-pass model with cutoff $\omega_c = 2\pi/T_c$ isolates the contribution of
+the \emph{first} aliasing harmonic and above: a protocol whose filter function is
+below $\omega_c$ suppresses both in-band technical noise and all Dick-effect harmonics
+simultaneously.
 The relationship between FOM and the Allan deviation $\sigma_y(\tau)$, and the
 breakdown of linear response at large noise amplitudes, are discussed in
 Sec.~\ref{sec:strong_noise}.
@@ -1129,6 +1147,10 @@ analyses in Secs.~\ref{sec:hf_noise} and~\ref{sec:lorentzian_noise} below.
 Figure~\ref{fig:hf_cutoff} shows the FOM as a function of the high-pass noise
 cutoff $\omega_c$, sweeping from $\omega_c=0$ (full white noise) to
 $\omega_c=28$\,rad/s.
+In the Dick-effect picture, this sweep corresponds to varying the first aliasing
+harmonic $\omega_c = 2\pi/T_c$: a clock whose interrogation cycle is short enough
+that $\omega_c$ falls below the filter-function passband suffers no aliased noise
+at any harmonic.
 Several features emerge:
 \begin{enumerate}
   \item \textbf{GPS $m=1$ diverges rapidly above $\omega_c\approx 1$.}
@@ -1365,6 +1387,18 @@ protocols---the filter function reduces to (Sec.~\ref{sec:kubo})
   \mathcal{X}(\omega) = \int_0^T |G(t)|^2\,e^{-i\omega t}\,dt\,.
   \label{eq:Fe_GPS}
 \ee
+The practical importance of the roll-off exponent is sharpened by the Dick
+effect~\eqref{eq:dick}: for a clock with cycle time $T_c$ the aliasing harmonics fall at
+$\omega_n = 2\pi n/T_c$, and the Dick noise scales as $\sum_n\mathcal{F}_e(\omega_n)/\mathcal{F}_e(0)$.
+A square GPS envelope gives $\mathcal{F}_e(\omega_n)\propto\omega_n^{-4}$, so the
+$n$th harmonic is suppressed by a factor $n^{-4}$.
+A raised-cosine envelope gives $\mathcal{F}_e(\omega_n)\propto\omega_n^{-12}$, suppressing
+the same harmonic by $n^{-12}$: at $n=5$ this is already a factor $\sim 10^8$ better than
+the square case.
+The choice of envelope shape therefore has a qualitatively larger impact on Dick-effect
+noise than on the in-band Kubo integral, because the sum~\eqref{eq:dick} is dominated
+by the high-$n$ tail while the integral~\eqref{eq:fom} is dominated by low frequencies.
+
 Pulse shaping---smooth modulation of $\Omega(t)$---controls the high-frequency roll-off
 of $\mathcal{F}_e$ by governing the boundary smoothness of $|G(t)|^2 = \sin^2(\theta(t)/2)$,
 where $\theta(t)=\int_0^t\Omega(s)\,ds$ is the cumulative pulse area.
@@ -1543,46 +1577,57 @@ well outside the linear-response regime.
 \label{sec:conclusion}
 % ============================================================
 
-We have introduced temporal Quantum Signal Processing as a unified framework for
-analyzing and optimizing atomic clock protocols under realistic noise environments.
-The framework connects the algebraic structure of any pulse sequence---encoded in
-the amplitudes $F(t)$ and $G(t)$---to the two key performance metrics:
-the per-shot frequency sensitivity $\mathcal{S}^2$ and the noise filter function
-$\mathcal{F}_e(\omega)$.
-A DC consistency condition, $\mathcal{F}_e(0) = \mathcal{S}^2$, ties these two
-quantities together and directly sets the pre-factor of the clock's Allan deviation.
+The central contribution of this work is temporal Quantum Signal Processing: a unified
+analytical framework that places Ramsey spectroscopy, Global Phase Spectroscopy,
+composite equiangular sequences, and pulsed QSP protocols on a common algebraic
+footing for the first time.
+The framework yields closed-form filter functions and signal sensitivities for any
+pulse sequence on two-level and three-level $\Lambda$-clock systems, enabling
+principled comparison and optimization across noise environments.
+A key structural output of this unification is a DC consistency condition: the filter
+function at zero frequency is identically equal to the squared signal slope, so
+sensitivity and noise suppression are not independently tunable.
+This constraint---invisible in prior qubit-only filter-function analyses because it
+requires tracking both the probe and clock channels of the three-level system---
+motivates the normalized frequency variance $\sigma^2_\nu$ as the natural clock
+figure of merit, and directly governs the prefactor of the Allan deviation.
 
-The framework reveals a layered performance structure.
-All continuous-drive three-level protocols (GPS, equiangular) share a common DC
-sensitivity $\mathcal{S}^2 = T^2/4$, a factor of four below optimal two-level Ramsey;
-performance differences among them are therefore determined entirely by filter-function shape.
-The double-$\pi$ pulsed QSP reference ($n=2$) breaks this constraint, achieving
-$\mathcal{F}_e(0)\approx T^2$ and closing the gap to two-level Ramsey.
-The filter function for GPS and equiangular sequences is governed by the clock
-channel $|\mathcal{X}(\omega)|^2$ alone (since $G(T)=0$); under the correct
-detuning Hamiltonian $H_\delta = \delta|e\rangle\langle e|$, this channel is
-peaked at the Rabi frequency rather than nulled there, as incorrectly predicted
-by the traceless approximation.
+Within this framework, a quantitative protocol hierarchy emerges across noise
+environments.
+Optimized equiangular sequences ($N=8,16$) and pulsed QSP ($n=4,8,13$) achieve
+$\sigma^2_\nu$ three to four times lower than two-level Ramsey under white and $1/f$
+noise, with the dominant gain coming from the first few pulse segments and diminishing
+returns beyond $n\approx8$.
+For band-limited high-pass noise, GPS $m=1$ and equiangular $N=4$ are near-optimal,
+reaching roughly $60\times$ lower $\sigma^2_\nu$ than Ramsey when the noise cutoff
+exceeds the drive frequency---a consequence of spectral sparsity in the filter
+function rather than asymptotic roll-off.
+Pulsed QSP sequences additionally recover the full DC sensitivity of two-level Ramsey
+in the three-level system, breaking the factor-of-four sensitivity ceiling shared by
+all continuous-drive three-level protocols.
 
-The quantitative comparison of Table~\ref{tab:fom} establishes a noise-environment-dependent
-protocol hierarchy; no single protocol is universally optimal.
-Optimized pulsed QSP ($n=4,8,13$) and equiangular sequences ($N=8,16$) both achieve
-$\sigma^2_\nu$ substantially below two-level Ramsey: 3--4$\times$ lower for white and
-$1/f$ noise.
-GPS $m=1$ is near-optimal for band-limited high-pass noise environments, with
-$\sigma^2_\nu \approx 60\times$ below Ramsey when the noise cutoff exceeds the drive
-frequency; equiangular $N=4$ matches GPS $m=1$ closely for this noise model.
+The temporal QSP framework also yields an analytical theory of pulse shaping.
+The high-frequency roll-off of the filter function is determined entirely by the
+boundary smoothness of the drive envelope: square pulses give $\propto\omega^{-4}$
+decay, raised-cosine envelopes give $\propto\omega^{-12}$, and Planck-taper envelopes
+achieve steeper suppression still.
+This direct, analytical connection between shaping choices and out-of-band noise
+rejection is not available in prior composite-pulse or dynamical-decoupling analyses,
+and opens a systematic route to designing drives that are matched to a specific noise
+spectral density.
+The same roll-off law governs the Dick-effect aliasing sum~\eqref{eq:dick}, so moving
+from a square to a smooth GPS envelope simultaneously suppresses both out-of-band
+technical noise and LO noise aliased at harmonics of the interrogation cycle---gains
+that are multiplicative across the full harmonic series.
 
-The temporal QSP framework opens several natural directions for future work.
-Gradient-descent optimization of Fourier-parameterized GPS envelopes yields $1.4\times$
-lower white-noise $\sigma^2_\nu$ for $m=1$, confirming that the square GPS $m=1$
-pulse is already near-optimal for high-pass noise with $\omega_c\geq 2\Omega$---a
-consequence of the spectral sparsity of $|G(t)|^2=\sin^2(t/2)$---while leaving room
-for shaped envelopes to improve white and $1/f$ noise performance.
-Beyond pulse shaping, the extension to multi-axis noise (simultaneous dephasing and
-amplitude noise), the incorporation of atom-light coherence time limits, and the
-application to other multi-level quantum sensing platforms are all accessible within
-the same algebraic structure of temporal QSP.
+Several directions follow naturally from this work.
+The framework extends to multi-axis noise (simultaneous dephasing and amplitude
+fluctuations), atom-light coherence time constraints, and other multi-level quantum
+sensing platforms.
+Gradient optimization over continuously parameterized envelope families offers a route
+to protocols simultaneously near-optimal across multiple noise models, and the
+algebraic structure of temporal QSP suggests connections to quantum optimal control
+and resource-theoretic bounds on clock stability.
 
 % ============================================================
 \begin{acknowledgments}
