@@ -9,7 +9,6 @@
 \usepackage{bm}
 \usepackage{physics}
 \usepackage{xcolor}
-\usepackage{xr}
 \usepackage{hyperref}
 \usepackage{cleveref}
 \usepackage{float}
@@ -35,9 +34,6 @@
 
 \graphicspath{{figures/qubit_performance_plots/}}
 
-% Cross-reference supplemental equations (compile supplemental_pra first).
-% Prefix S- avoids label collisions (e.g. eq:phop exists in both documents).
-\externaldocument[S-]{supplemental_pra}
 
 \begin{document}
 
@@ -192,8 +188,7 @@ out-of-band noise rejection.
 This extends temporal QSP beyond pulsed sequences to analytically tractable shaped drives,
 a direction not covered by prior QSP or filter-function work.
 
-The GPS protocol~\cite{GPS} demonstrated that, under the correct laser-detuning
-Hamiltonian (where only the excited state is energetically shifted), integer-cycle
+The GPS protocol~\cite{GPS} demonstrated that integer-cycle
 resonance retains full DC sensitivity at all Rabi orders; prior claims of
 filter-function nulls at the drive frequency arose from an incorrect symmetric
 approximation to this Hamiltonian.
@@ -240,12 +235,6 @@ We address the following central questions in clock protocol design:
         power-law roll-off $\propto\omega^{-4}$, a raised-cosine envelope gives
         $\propto\omega^{-12}$, and gradients over Fourier-parameterized envelopes can
         optimize the roll-off for a given noise model.
-
-  \item \emph{Can a three-level clock match the sensitivity of two-level Ramsey?}
-        Pulsed QSP sequences optimized over pulse angles and phases converge
-        to a double-$\pi$ structure whose DC sensitivity matches that of optimal
-        two-level Ramsey spectroscopy, recovering the $4\times$ sensitivity advantage
-        over continuous-drive three-level protocols.
 
   \item \emph{When does the linear-response filter-function picture break down?}
         We derive analytical conditions on the noise amplitude and interrogation time
@@ -336,8 +325,7 @@ figure of merit (FOM).
 A key structural insight, which we call the \emph{DC consistency condition},
 is that the filter function evaluated at zero frequency equals the squared signal slope:
 \be
-  \mathcal{F}_e(0) = \left|\int_0^T|G(t)|^2\,dt\right|^2 = \mathcal{S}^2
-  = |\partial_\delta\langle M\rangle|^2_{\delta=0}\,.
+  \mathcal{F}_e(0) = \mathcal{S}^2 = |\partial_\delta\langle M\rangle|^2_{\delta=0}\,.
   \label{eq:dc_consistency}
 \ee
 The filter function $\mathcal{F}_e(\omega)$ therefore describes the sequence's
@@ -348,7 +336,7 @@ oscillating at that frequency.
 
 This observation suggests the natural bandlimited FOM
 \be
-  \sigma^2_\nu(S_\beta) \equiv
+  \sigma^{2,\rm FL}_\nu(S_\beta) \equiv
   \frac{\displaystyle\int_{\omega_{\min}}^{\infty}
     \frac{d\omega}{2\pi}\,S_\beta(\omega)\,\mathcal{F}_e(\omega)}
   {\mathcal{F}_e(0)}\,,
@@ -371,7 +359,7 @@ For three-level $\Lambda$-clock protocols, the standard Ramsey sequence achieves
 $\mathcal{F}_e^{\rm Ramsey}(0) = T^2/4$; any sequence that reduces $\mathcal{F}_e(0)$
 below this value while also worsening noise performance is doubly penalized.
 The fundamental upper bound is $\mathcal{F}_e(0) = T^2$,
-achievable by the double-$\pi$ QSP construction (Sec.~\ref{sec:qsp_results}) and by
+achievable by the double-$\pi$ QSP construction (Sec.~\ref{sec:qsp_pulsed}) and by
 optimal two-level Ramsey spectroscopy~\cite{Ramsey1950}.
 
 In practice, numerical optimization of $\sigma^2_\nu$ over sequence parameters
@@ -625,7 +613,7 @@ are not independent quantities.
 For sequences satisfying $G(T)=0$ (Ramsey, GPS-$m$, equiangular), $M_I(T)$ is
 proportional to $M = \sigma_y^{gm}$ in the $\{g,m\}$ subspace with
 $M_I(T) = m_y M$, $m_y = (-1)^m$ for GPS-$m$
-(Supplemental Material, Eqs.~\eqref{S-eq:MI_bloch}--\eqref{S-eq:r_G0}).
+(Supplemental Material, Sec.~SII.3).
 In this case $r(t) = i\,m_y\,|G(t)|^2$ and, since $m_y^2=1$:
 \be
   \mathcal{F}(\omega) = |\mathcal{X}(\omega)|^2
@@ -635,7 +623,7 @@ In this case $r(t) = i\,m_y\,|G(t)|^2$ and, since $m_y^2=1$:
 For general pulsed QSP sequences with $G(T)\neq 0$, $M_I(T)$ acquires
 coherence-channel contributions and the filter function receives additional
 cross-terms involving $\Phi(\omega) = \mathcal{F}[F^*G]$
-(Supplemental Material, Eq.~\eqref{S-eq:r_general}).
+(Supplemental Material, Sec.~SII.3).
 For the two-level sensor (Supplemental Material, Sec.~SVIII), $r(t)\propto\mathrm{Im}[F^*G]$
 and $\mathcal{F}(\omega) = |\Phi(\omega)|^2$; the population channel carries no
 independent information in that case because $|G|^2 = 1-|F|^2$ is determined by
@@ -679,7 +667,10 @@ noise response is captured entirely by the coherence channel $F^*G$;
 the population channel carries no additional information and drops out of
 the variance calculation.
 Without a third reference state $|m\rangle$ that is unaffected by the drive,
-there is no way to independently resolve $|G|^2$ from the measurement of $M$.
+no measurement with non-zero signal slope at $\delta=0$ yields a pure
+population-channel filter function $|\mathcal{X}(\omega)|^2$: the coherence
+and population channels always enter together, and the optimal measurement
+($M = \sigma_y$, equatorial state) singles out the coherence channel alone.
 
 \subsection{Ramsey protocol: filter function and signal slope}
 \label{sec:ramsey}
@@ -870,7 +861,7 @@ $\cos(m\pi)=(-1)^m$, so
 three-level $\pi/2$ Ramsey}: $|\mathcal{S}|^2 = T^2/4$ [Eq.~\eqref{eq:gps_sens_result}].
 Note that this three-level DC sensitivity is four times below the optimal two-level $\pi/2$
 Ramsey sensitivity $|\mathcal{S}|^2 = T^2$ (Sec.~\ref{sec:ramsey});
-the double-$\pi$ Ramsey-type QSP construction of Sec.~\ref{sec:qsp_results} recovers this factor.
+the double-$\pi$ Ramsey-type QSP construction of Sec.~\ref{sec:qsp_pulsed} recovers this factor.
 
 \subsection{GPS filter function structure}
 \label{sec:gps_ff}
@@ -927,7 +918,7 @@ confirming that the results of Table~\ref{tab:fom} are quantitatively reliable
 within the linear-response regime.
 Section~\ref{sec:protocol_classes} introduces the two optimizable protocol
 families.
-Sections~\ref{sec:filter_functions_comparison}--\ref{sec:analytics_results} present
+Sections~\ref{sec:filter_functions_comparison}--\ref{sec:lorentzian_noise} present
 the filter-function comparison and FOM hierarchy across noise models.
 Section~\ref{sec:numerics} closes with numerical validation.
 
@@ -938,7 +929,7 @@ Section~\ref{sec:numerics} closes with numerical validation.
 % ------------------------------------------------------------
 
 Both optimizable protocol families below are instances of the temporal QSP
-formalism (Sec.~\ref{sec:qsp}): they differ in whether the control is applied
+formalism (Sec.~\ref{sec:temporal_qsp}): they differ in whether the control is applied
 as a continuous drive or as instantaneous pulses separated by free evolution.
 They are evaluated alongside Ramsey and GPS as fixed analytic baselines.
 
@@ -1008,7 +999,7 @@ Sec.~\ref{sec:gps_ff}:
         near $\omega=1$ with very little weight above $\omega\approx 4$.
   \item \textbf{Double-$\pi$ QSP} (purple dotted, $n=2$) has the same filter-function
         shape as Ramsey but scaled up by $4\times$ at $\omega=0$, serving as a
-        DC-sensitivity reference (Sec.~\ref{sec:qsp_results}).
+        DC-sensitivity reference (Sec.~\ref{sec:qsp_pulsed}).
   \item \textbf{Best equiangular} and \textbf{best QSP} (orange and navy, noise-optimized)
         shift spectral weight away from the dominant noise band; the optimal choice
         depends strongly on the noise model.
@@ -1102,7 +1093,7 @@ matched to the dominant noise mechanism.
         heavily to the noise integral under a flat noise spectrum.
         The double-$\pi$ QSP ($n{=}2$) achieves $\sigma^2_\nu\approx7.6\times10^{-3}$,
         comparable to Ramsey; its primary advantage is the $4\times$ higher
-        DC sensitivity $\mathcal{F}_e(0)\approx T^2$ (Sec.~\ref{sec:qsp_results}),
+        DC sensitivity $\mathcal{F}_e(0)\approx T^2$ (Sec.~\ref{sec:qsp_pulsed}),
         which widens the dynamic range and reduces the impact of measurement noise.
   \item \textbf{$1/f$ noise.}
         Ordering (lower $\sigma^2_\nu$ is better):
@@ -1373,6 +1364,44 @@ Sec.~\ref{sec:strong_noise} is required.
     variance saturates while the Kubo prediction continues to grow.
     Dashed vertical line: $\epsilon_{\rm rms} = 1$.}
   \label{fig:kubo_validity}
+\end{figure}
+
+\paragraph{Noise-colour independence.}
+The $\epsilon_{\rm rms} \approx 0.2$ threshold is not specific to white noise.
+The accumulated probe phase $\Phi = \int_0^T \beta(t)\,dt$ is a Gaussian random
+variable regardless of the spectral colour of $\beta(t)$, because it is a linear
+functional of a Gaussian process.
+Its variance is
+$\sigma_\Phi^2 = 4\,\mathrm{Var}[M]_{\rm Kubo}$,
+where $\mathrm{Var}[M]_{\rm Kubo} = \int_{\omega_{\rm min}}^{\infty} F_e(\omega)\,
+S(\omega)\,d\omega/\pi$ is the Kubo integral with the coloured one-sided PSD
+$S(\omega)=S_0/\omega^\alpha$.
+The exact Ramsey variance generalises to
+\be
+  \mathrm{Var}[M]_{\rm exact}
+    = \frac{1 - e^{-8\,\mathrm{Var}[M]_{\rm Kubo}}}{8}\,,
+  \label{eq:ramsey_exact_colored}
+\ee
+which recovers Eq.~\eqref{eq:ramsey_exact_var} for white noise ($\alpha=0$).
+Figure~\ref{fig:kubo_colored} verifies this for $1/f$ and $1/f^2$ noise:
+the ratio $\mathrm{Var}_{\rm exact}/\mathrm{Var}_{\rm Kubo}$ exceeds $0.96$ for
+$\epsilon_{\rm rms} \leq 0.2$ in both cases, confirming that the perturbative
+threshold is colour-independent.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.48\textwidth]{kubo_colored_noise.pdf}
+  \caption{Kubo validity for coloured noise.
+    Ratio of exact Ramsey variance~\eqref{eq:ramsey_exact_colored} to the
+    linear-response Kubo prediction as a function of
+    $\epsilon_{\rm rms} = \sqrt{\sigma_\Phi^2}$, for $1/f$ (left) and
+    $1/f^2$ (right) noise, $T=2\pi$.
+    The dotted vertical line marks $\epsilon_{\rm rms} = 0.2$.
+    Both noise models show ratio $> 0.96$ for
+    $\epsilon_{\rm rms} \leq 0.2$, matching the white-noise result of
+    Fig.~\ref{fig:kubo_validity} and confirming that the perturbative
+    threshold is colour-independent.}
+  \label{fig:kubo_colored}
 \end{figure}
 
 % ============================================================
