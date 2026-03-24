@@ -1368,39 +1368,47 @@ Sec.~\ref{sec:strong_noise} is required.
 
 \paragraph{Noise-colour independence.}
 The $\epsilon_{\rm rms} \approx 0.2$ threshold is not specific to white noise.
-The accumulated probe phase $\Phi = \int_0^T \beta(t)\,dt$ is a Gaussian random
-variable regardless of the spectral colour of $\beta(t)$, because it is a linear
-functional of a Gaussian process.
-Its variance is
-$\sigma_\Phi^2 = 4\,\mathrm{Var}[M]_{\rm Kubo}$,
+The accumulated probe phase $\Phi = \int_0^T \beta(t)\,dt$ is Gaussian for
+any spectral colour because it is a linear functional of a Gaussian process.
+Its variance is $\sigma_\Phi^2 = 4\,\mathrm{Var}[M]_{\rm Kubo}$,
 where $\mathrm{Var}[M]_{\rm Kubo} = \int_{\omega_{\rm min}}^{\infty} F_e(\omega)\,
-S(\omega)\,d\omega/\pi$ is the Kubo integral with the coloured one-sided PSD
+S(\omega)\,d\omega/\pi$ is the Kubo integral with coloured one-sided PSD
 $S(\omega)=S_0/\omega^\alpha$.
-The exact Ramsey variance generalises to
+The exact Ramsey variance therefore generalises to
 \be
   \mathrm{Var}[M]_{\rm exact}
     = \frac{1 - e^{-8\,\mathrm{Var}[M]_{\rm Kubo}}}{8}\,,
   \label{eq:ramsey_exact_colored}
 \ee
-which recovers Eq.~\eqref{eq:ramsey_exact_var} for white noise ($\alpha=0$).
-Figure~\ref{fig:kubo_colored} verifies this for $1/f$ and $1/f^2$ noise:
-the ratio $\mathrm{Var}_{\rm exact}/\mathrm{Var}_{\rm Kubo}$ exceeds $0.96$ for
-$\epsilon_{\rm rms} \leq 0.2$ in both cases, confirming that the perturbative
-threshold is colour-independent.
+recovering Eq.~\eqref{eq:ramsey_exact_var} for white noise ($\alpha=0$).
+We verify this numerically in Fig.~\ref{fig:kubo_colored} for $1/f$ and
+$1/f^2$ noise by two independent methods: the analytic
+formula~\eqref{eq:ramsey_exact_colored} and a direct Monte Carlo in which
+coloured noise realisations are generated via spectral filtering, the
+accumulated phase $\Phi = \sum_k \beta_k\,\Delta t$ is computed, and
+$\mathrm{Var}[-\sin(\Phi)/2]$ is measured empirically ($8\times 10^3$
+trajectories per noise level).
+The MC points lie on the analytic curve throughout, confirming both the Kubo
+normalisation and the exact formula.
+Both noise models give ratio $>0.96$ for $\epsilon_{\rm rms}\leq 0.2$,
+matching the white-noise threshold and establishing that the perturbative
+condition is colour-independent.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.48\textwidth]{kubo_colored_noise.pdf}
   \caption{Kubo validity for coloured noise.
-    Ratio of exact Ramsey variance~\eqref{eq:ramsey_exact_colored} to the
-    linear-response Kubo prediction as a function of
+    Ratio of exact/MC Ramsey variance to the linear-response Kubo
+    prediction~\eqref{eq:kubo_general} as a function of
     $\epsilon_{\rm rms} = \sqrt{\sigma_\Phi^2}$, for $1/f$ (left) and
     $1/f^2$ (right) noise, $T=2\pi$.
-    The dotted vertical line marks $\epsilon_{\rm rms} = 0.2$.
-    Both noise models show ratio $> 0.96$ for
-    $\epsilon_{\rm rms} \leq 0.2$, matching the white-noise result of
-    Fig.~\ref{fig:kubo_validity} and confirming that the perturbative
-    threshold is colour-independent.}
+    \emph{Solid}: analytic formula~\eqref{eq:ramsey_exact_colored}.
+    \emph{Circles}: direct Monte Carlo ($8\times 10^3$ trajectories).
+    Dotted vertical line: $\epsilon_{\rm rms} = 0.2$.
+    Both methods agree throughout; ratio $> 0.96$ for
+    $\epsilon_{\rm rms} \leq 0.2$, matching the white-noise result
+    of Fig.~\ref{fig:kubo_validity} and confirming colour-independence
+    of the perturbative threshold.}
   \label{fig:kubo_colored}
 \end{figure}
 
